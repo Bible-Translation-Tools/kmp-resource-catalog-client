@@ -1,0 +1,105 @@
+plugins {
+    id "com.android.library"
+    id "org.jetbrains.kotlin.multiplatform"
+    id "org.jetbrains.kotlin.plugin.serialization"
+    id "maven-publish"
+}
+
+group = "org.bibletranslationtools"
+version = "1.0.0"
+
+kotlin {
+    jvmToolchain(11)
+
+    androidTarget {
+        publishLibraryVariants("release")
+    }
+    jvm()
+
+    sourceSets {
+        commonMain {
+            dependencies {
+                implementation "org.jetbrains.kotlinx:kotlinx-serialization-json:1.11.0"
+                implementation 'io.ktor:ktor-client-core:3.4.3'
+                implementation 'io.ktor:ktor-client-okhttp:3.4.3'
+                implementation 'io.ktor:ktor-client-content-negotiation:3.4.3'
+                implementation 'io.ktor:ktor-serialization-kotlinx-json:3.4.3'
+            }
+        }
+
+        commonTest {
+            dependencies {
+                implementation(kotlin("test"))
+                implementation("io.ktor:ktor-client-mock:3.4.3")
+                implementation("org.jetbrains.kotlinx:kotlinx-coroutines-test:1.10.2")
+            }
+        }
+    }
+}
+
+android {
+    namespace "org.bibletranslationtools.resource-catalog-client"
+    compileSdk = 35
+    defaultConfig {
+        minSdk 21
+    }
+    buildTypes {
+        release {
+            minifyEnabled false
+            proguardFiles getDefaultProguardFile('proguard-android.txt'), 'proguard-rules.pro'
+        }
+    }
+    buildFeatures {
+        buildConfig = true
+    }
+}
+
+publishing {
+    publications.withType(MavenPublication).configureEach {
+        groupId = group
+        version = version
+        pom {
+            name = "Logger"
+            description = "A better logging tool"
+            inceptionYear = "2025"
+            url = "https://github.com/bibletranslationtools/kmp-resource-catalog-client/"
+            licenses {
+                license {
+                    name = "GNU GENERAL PUBLIC LICENSE, Version 2.0"
+                    url = "http://www.gnu.org/licenses/gpl-2.0.en.html"
+                    distribution = "repo"
+                }
+            }
+            developers {
+                developer {
+                    id = "bibletranslationtools"
+                    name = "BibleTranslationTools"
+                    url = "https://github.com/bibletranslationtools/"
+                }
+            }
+            scm {
+                url = "https://github.com/bibletranslationtools/kmp-resource-catalog-client/"
+                connection = "scm:git:git://github.com/bibletranslationtools/kmp-resource-catalog-client.git"
+                developerConnection = "scm:git:ssh://git@github.com/bibletranslationtools/kmp-resource-catalog-client.git"
+            }
+            issueManagement {
+                url = "https://github.com/bibletranslationtools/kmp-resource-catalog-client/issues"
+                system = "github"
+            }
+        }
+    }
+
+    repositories {
+        maven {
+            name = "Nexus"
+            url = version.endsWith('SNAPSHOT')
+                ? "https://nexus-registry.walink.org/repository/maven-snapshots"
+                : "https://nexus-registry.walink.org/repository/maven-releases"
+
+            credentials {
+                username = project.findProperty("repoUser") ?: System.getenv("REPO_USER")
+                password = project.findProperty("repoPassword") ?: System.getenv("REPO_PASSWORD")
+            }
+        }
+    }
+}

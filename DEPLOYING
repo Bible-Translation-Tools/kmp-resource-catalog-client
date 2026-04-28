@@ -1,0 +1,6 @@
+These notes are just to help me remember how to publish the package.
+
+1. Make sure your local.properties has been properly set up to include your nexus repo info
+2. run tests `gradlew jvmTest`
+2. build the app using `gradlew clean assemble`
+3. upload using `gradlew publishAllPublicationsToNexus`
