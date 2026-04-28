@@ -60,8 +60,8 @@ publishing {
         version = version
         pom {
             name = "Logger"
-            description = "A better logging tool"
-            inceptionYear = "2025"
+            description = "A client library for interacting with the resource catalogs"
+            inceptionYear = "2026"
             url = "https://github.com/bibletranslationtools/kmp-resource-catalog-client/"
             licenses {
                 license {
