@@ -25,3 +25,6 @@ SELECT cm.id, cm.chapter, cm.verse
 FROM chunk_marker AS cm
 LEFT JOIN versification AS v ON v.id = cm.versification_id
 WHERE v.slug = :versificationSlug AND cm.project_slug = :projectSlug;
+
+lastInsertRowId:
+SELECT last_insert_rowid();

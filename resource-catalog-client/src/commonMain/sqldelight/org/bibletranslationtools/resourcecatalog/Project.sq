@@ -28,6 +28,12 @@ ON CONFLICT(source_language_id, slug) DO UPDATE SET
     chunks_url = excluded.chunks_url,
     category_id = excluded.category_id;
 
+selectIdBySlug:
+SELECT id
+FROM project
+WHERE slug = :projectSlug
+LIMIT 1;
+
 selectIdByLanguageAndSlug:
 SELECT id
 FROM project

@@ -4,6 +4,7 @@ import app.cash.sqldelight.db.SqlDriver
 import org.bibletranslationtools.resourcecatalog.models.Catalog
 import org.bibletranslationtools.resourcecatalog.models.Category
 import org.bibletranslationtools.resourcecatalog.models.CategoryEntry
+import org.bibletranslationtools.resourcecatalog.models.ChunkMarker
 import org.bibletranslationtools.resourcecatalog.models.SourceLanguage
 import org.bibletranslationtools.resourcecatalog.models.TargetLanguage
 import org.bibletranslationtools.resourcecatalog.models.Translation
@@ -114,6 +115,11 @@ object CatalogClient {
     fun addTargetLanguage(language: TargetLanguage): Boolean = library.addTargetLanguage(language)
 
     /**
+     * Deletes all target languages
+     */
+    fun clearTargetLanguages() = library.clearTargetLanguages()
+
+    /**
      * Inserts or updates a temporary target language in the library.
      *
      * Note: the result is boolean since you don't need the row id. See getTargetLanguages for more information
@@ -124,6 +130,27 @@ object CatalogClient {
     fun addTempTargetLanguage(
         language: TargetLanguage
     ): Boolean = library.addTempTargetLanguage(language)
+
+    /**
+     * Maps approved target language to temporary language
+     *
+     * @param tempTargetLanguageSlug temporary target language slug
+     * @param targetLanguageSlug approved target language slug
+     */
+    fun setApprovedTargetLanguage(
+        tempTargetLanguageSlug: String,
+        targetLanguageSlug: String
+    ) = library.setApprovedTargetLanguage(tempTargetLanguageSlug, targetLanguageSlug)
+
+    /**
+     * Deletes all temporary languages
+     */
+    fun clearTempLanguages() = library.clearTempLanguages()
+
+    /**
+     * Unassociates all approved languages from temporary languages
+     */
+    fun clearApprovedTempLanguages() = library.clearApprovedTempLanguages()
 
     /**
      * Returns a project with the option of falling back to a default language if not found
@@ -151,6 +178,13 @@ object CatalogClient {
         languageSlug: String,
         enableDefaultLanguage: Boolean = true
     ) = library.getProjects(languageSlug, enableDefaultLanguage)
+
+    /**
+     * Check if a project exists by this slug
+     *
+     * @param projectSlug project slug
+     */
+    fun getProjectExists(projectSlug: String): Boolean = library.getProjectExists(projectSlug)
 
     /**
      * Returns an array of categories that exist underneath the parent category.
@@ -336,6 +370,12 @@ object CatalogClient {
         versificationSlug: String
     ) = library.getChunkMarkers(projectSlug, versificationSlug)
 
+    fun addChunkMarker(
+        chunk: ChunkMarker,
+        projectSlug: String,
+        versificationId: Long
+    ) = library.addChunkMarker(chunk, projectSlug, versificationId)
+
     /**
      * Returns a versification
      *
@@ -369,4 +409,11 @@ object CatalogClient {
         versification: Versification,
         languageId: Long
     ): Long = library.addVersification(versification, languageId)
+
+    /**
+     * Compacts the database file by reclaiming space left by deleted rows.
+     * This operation rewrites the entire database, so it may take a while
+     * on large databases and blocks all other database access during that time.
+     */
+    fun vacuum() = library.vacuum()
 }

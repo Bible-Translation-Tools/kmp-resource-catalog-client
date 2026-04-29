@@ -5,7 +5,6 @@ import org.bibletranslationtools.resourcecatalog.models.Catalog
 import org.bibletranslationtools.resourcecatalog.models.Category
 import org.bibletranslationtools.resourcecatalog.models.CategoryEntry
 import org.bibletranslationtools.resourcecatalog.models.ChunkMarker
-import org.bibletranslationtools.resourcecatalog.models.ProjectMeta
 import org.bibletranslationtools.resourcecatalog.models.SourceLanguage
 import org.bibletranslationtools.resourcecatalog.models.TargetLanguage
 import org.bibletranslationtools.resourcecatalog.models.Translation
@@ -21,13 +20,13 @@ import org.bibletranslationtools.resourcecontainer.ResourceContainer
  * Manages the indexed library content using SQLDelight.
  *
  * The driver is owned by the caller — typically constructed via
- * [DatabaseDriverFactory], which can copy a prepopulated database out of assets
+ * [createDatabaseDriver], which can copy a prepopulated database out of assets
  * on first launch and point SQLDelight at it.
  */
 internal class Library(
     private val driver: SqlDriver,
     private val database: Database = Database(driver)
-) : Index {
+) {
 
     // Generated query handles
     private val sourceLanguageQ = database.sourceLanguageQueries
@@ -75,7 +74,7 @@ internal class Library(
     // ---- writes ---------------------------------------------------------------------------------
 
     @Throws(Exception::class)
-    override fun addSourceLanguage(language: SourceLanguage): Long {
+    fun addSourceLanguage(language: SourceLanguage): Long {
         validateNotEmpty(language.slug)
         validateNotEmpty(language.name)
         validateNotEmpty(language.direction)
@@ -91,7 +90,7 @@ internal class Library(
     }
 
     @Throws(Exception::class)
-    override fun addTargetLanguage(language: TargetLanguage): Boolean {
+    fun addTargetLanguage(language: TargetLanguage): Boolean {
         validateNotEmpty(language.slug)
         validateNotEmpty(language.name)
         validateNotEmpty(language.direction)
@@ -108,7 +107,7 @@ internal class Library(
     }
 
     @Throws(Exception::class)
-    override fun addTempTargetLanguage(language: TargetLanguage): Boolean {
+    fun addTempTargetLanguage(language: TargetLanguage): Boolean {
         validateNotEmpty(language.slug)
         validateNotEmpty(language.name)
         validateNotEmpty(language.direction)
@@ -142,7 +141,7 @@ internal class Library(
     }
 
     @Throws(Exception::class)
-    override fun addProject(
+    fun addProject(
         project: Project,
         categories: List<Category>,
         sourceLanguageId: Long
@@ -189,7 +188,7 @@ internal class Library(
     }
 
     @Throws(Exception::class)
-    override fun addVersification(versification: Versification, sourceLanguageId: Long): Long {
+    fun addVersification(versification: Versification, sourceLanguageId: Long): Long {
         validateNotEmpty(versification.slug)
         validateNotEmpty(versification.name)
 
@@ -230,7 +229,7 @@ internal class Library(
     }
 
     @Throws(Exception::class)
-    override fun addCatalog(catalog: Catalog): Long {
+    fun addCatalog(catalog: Catalog): Long {
         validateNotEmpty(catalog.slug)
         validateNotEmpty(catalog.url)
 
@@ -245,7 +244,7 @@ internal class Library(
     }
 
     @Throws(Exception::class)
-    override fun addResource(resource: Resource, projectId: Long): Long {
+    fun addResource(resource: Resource, projectId: Long): Long {
         validateNotEmpty(resource.slug)
         validateNotEmpty(resource.name)
         validateNotEmpty(resource.type)
@@ -297,7 +296,7 @@ internal class Library(
 
     // ---- reads ----------------------------------------------------------------------------------
 
-    override fun listSourceLanguagesLastModified(): List<Map<String, Int>> {
+    fun listSourceLanguagesLastModified(): List<Map<String, Int>> {
         val pattern = "${ResourceContainer.BASE_MIME_TYPE}+%"
         return resourceFormatQ.sourceLanguagesLastModified(pattern)
             .executeAsList()
@@ -306,7 +305,7 @@ internal class Library(
             }
     }
 
-    override fun listProjectsLastModified(languageSlug: String?): Map<String, Int> {
+    fun listProjectsLastModified(languageSlug: String?): Map<String, Int> {
         val pattern = "${ResourceContainer.BASE_MIME_TYPE}+%"
         return resourceFormatQ.projectsLastModified(
             mimeTypePattern = pattern,
@@ -316,27 +315,16 @@ internal class Library(
         }
     }
 
-    fun getProjectMeta(projectSlug: String): ProjectMeta? {
-        val row = projectQ.selectMetaBySlug(projectSlug).executeAsOneOrNull() ?: return null
-        return try {
-            ProjectMeta(
-                slug = row.slug,
-                icon = row.icon ?: "",
-                sort = row.sort.toString(),
-                chunksUrl = row.chunks_url ?: "",
-                categoryId = row.category_id.toString()
-            )
-        } catch (e: Exception) {
-            e.printStackTrace()
-            null
-        }
+    fun getProjectExists(projectSlug: String): Boolean {
+        return projectQ.selectIdBySlug(projectSlug)
+            .executeAsOneOrNull() != null
     }
 
-    override fun getTranslation(containerSlug: String): Translation? {
+    fun getTranslation(containerSlug: String): Translation? {
         return try {
             val slugs = ContainerTools.explodeSlug(containerSlug)
             val l = getSourceLanguage(slugs[0])
-            val p = getProject(slugs[0], slugs[1])
+            val p = getProject(slugs[0], slugs[1], false)
             val r = getResource(slugs[0], slugs[1], slugs[2])
             if (l != null && p != null && r != null) Translation(l.toLanguage(), p, r) else null
         } catch (e: Exception) {
@@ -345,7 +333,7 @@ internal class Library(
         }
     }
 
-    override fun findTranslations(
+    fun findTranslations(
         languageSlug: String?,
         projectSlug: String?,
         resourceSlug: String?,
@@ -365,7 +353,7 @@ internal class Library(
         ).executeAsList().map { row -> buildTranslationFromRow(row) }
     }
 
-    override fun getImportedTranslations(): List<Translation> {
+    fun getImportedTranslations(): List<Translation> {
         return resourceQ.importedTranslations().executeAsList().map { row ->
             buildTranslationFromRow(row)
         }
@@ -469,24 +457,24 @@ internal class Library(
         return Translation(l, p, r)
     }
 
-    override fun getSourceLanguage(sourceLanguageSlug: String): SourceLanguage? =
+    fun getSourceLanguage(sourceLanguageSlug: String): SourceLanguage? =
         sourceLanguageQ.selectBySlug(sourceLanguageSlug)
             .executeAsOneOrNull()
             ?.let { SourceLanguage(it.slug, it.name, it.direction) }
 
-    override fun getSourceLanguages(): List<SourceLanguage> =
+    fun getSourceLanguages(): List<SourceLanguage> =
         sourceLanguageQ.selectAllOrdered().executeAsList()
             .map { SourceLanguage(it.slug, it.name, it.direction) }
 
-    override fun getSourceLanguages(projectSlug: String): List<SourceLanguage> =
+    fun getSourceLanguages(projectSlug: String): List<SourceLanguage> =
         sourceLanguageQ.selectByProjectSlug(projectSlug).executeAsList()
             .map { SourceLanguage(it.slug, it.name, it.direction) }
 
-    override fun getTargetLanguage(targetLanguageSlug: String): TargetLanguage? =
+    fun getTargetLanguage(targetLanguageSlug: String): TargetLanguage? =
         targetLanguageQ.selectMergedBySlug(targetLanguageSlug)
                 .executeAsOneOrNull()?.toTargetLanguage()
 
-    override fun findTargetLanguage(nameQuery: String): List<TargetLanguage> {
+    fun findTargetLanguage(nameQuery: String): List<TargetLanguage> {
         val results = targetLanguageQ
             .findMergedByName("%${nameQuery.lowercase()}%")
             .executeAsList()
@@ -506,10 +494,10 @@ internal class Library(
         return results
     }
 
-    override fun getTargetLanguages(): List<TargetLanguage> =
+    fun getTargetLanguages(): List<TargetLanguage> =
         targetLanguageQ.selectMergedAll().executeAsList().map { it.toTargetLanguage() }
 
-    override fun getApprovedTargetLanguage(tempTargetLanguageSlug: String): TargetLanguage? =
+    fun getApprovedTargetLanguage(tempTargetLanguageSlug: String): TargetLanguage? =
         targetLanguageQ.selectApprovedByTempSlug(tempTargetLanguageSlug)
             .executeAsOneOrNull()
             ?.let {
@@ -556,7 +544,7 @@ internal class Library(
             isGatewayLanguage = bool(is_gateway_language)
         )
 
-    override fun getProject(
+    fun getProject(
         sourceLanguageSlug: String,
         projectSlug: String,
         enableDefaultLanguage: Boolean
@@ -582,7 +570,7 @@ internal class Library(
         return project
     }
 
-    override fun getProjects(
+    fun getProjects(
         sourceLanguageSlug: String,
         enableDefaultLanguage: Boolean
     ): List<Project> {
@@ -614,7 +602,7 @@ internal class Library(
         }
     }
 
-    override fun getProjectCategories(
+    fun getProjectCategories(
         parentCategoryId: Long,
         languageSlug: String,
         translateMode: String?
@@ -689,7 +677,7 @@ internal class Library(
         return out
     }
 
-    override fun getResource(
+    fun getResource(
         sourceLanguageSlug: String,
         projectSlug: String,
         resourceSlug: String
@@ -722,7 +710,7 @@ internal class Library(
         }
     }
 
-    override fun getResources(sourceLanguageSlug: String?, projectSlug: String): List<Resource> {
+    fun getResources(sourceLanguageSlug: String?, projectSlug: String): List<Resource> {
         return if (!sourceLanguageSlug.isNullOrEmpty()) {
             resourceQ.selectByProjectAndLanguage(
                 projectSlug = projectSlug,
@@ -779,16 +767,16 @@ internal class Library(
         }
     }
 
-    override fun getCatalog(catalogSlug: String): Catalog? =
+    fun getCatalog(catalogSlug: String): Catalog? =
         catalogQ.selectBySlug(catalogSlug).executeAsOneOrNull()?.let {
             Catalog(catalogSlug, it.url, it.modified_at.toInt())
         }
 
-    override fun getCatalogs(): List<Catalog> =
+    fun getCatalogs(): List<Catalog> =
         catalogQ.selectAll().executeAsList()
             .map { Catalog(it.slug, it.url, it.modified_at.toInt()) }
 
-    override fun getVersification(sourceLanguageSlug: String, versificationSlug: String): Versification? =
+    fun getVersification(sourceLanguageSlug: String, versificationSlug: String): Versification? =
         versificationQ.selectByLanguageAndSlug(
             languageSlug = sourceLanguageSlug,
             versificationSlug = versificationSlug
@@ -798,20 +786,20 @@ internal class Library(
             }
         }
 
-    override fun getVersifications(sourceLanguageSlug: String): List<Versification> =
+    fun getVersifications(sourceLanguageSlug: String): List<Versification> =
         versificationQ.selectByLanguage(sourceLanguageSlug).executeAsList().map {
             Versification(it.slug ?: "", it.name).apply {
                 rowId = it.id ?: 0L
             }
         }
 
-    override fun getChunkMarkers(projectSlug: String, versificationSlug: String): List<ChunkMarker> =
+    fun getChunkMarkers(projectSlug: String, versificationSlug: String): List<ChunkMarker> =
         chunkMarkerQ.selectByProjectAndVersification(
             versificationSlug = versificationSlug,
             projectSlug = projectSlug
         ).executeAsList().map { ChunkMarker(it.chapter, it.verse) }
 
-    override fun getCategory(languageSlug: String, categorySlug: String): Category? =
+    fun getCategory(languageSlug: String, categorySlug: String): Category? =
         categoryQ.selectByLanguageAndSlug(
             categorySlug = categorySlug,
             languageSlug = languageSlug
@@ -823,7 +811,7 @@ internal class Library(
             languageSlug = languageSlug
         ).executeAsOneOrNull()?.let { Category(it.slug, it.name ?: "") }
 
-    override fun getCategories(languageSlug: String, projectSlug: String): List<Category> {
+    fun getCategories(languageSlug: String, projectSlug: String): List<Category> {
         val first = categoryQ.selectByProjectAndLanguage(
             projectSlug = projectSlug,
             languageSlug = languageSlug

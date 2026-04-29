@@ -22,14 +22,3 @@ internal data class Project(
     val meta: List<String>,
     val sort: String
 )
-
-@Serializable
-internal data class ProjectMeta(
-    val slug: String,
-    val icon: String,
-    val sort: String,
-    @SerialName("chunks_url")
-    val chunksUrl: String,
-    @SerialName("category_id")
-    val categoryId: String
-)
