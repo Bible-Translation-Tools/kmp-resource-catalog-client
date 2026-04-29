@@ -1,4 +1,4 @@
-package org.bibletranslationtools.resourcecatalog.models
+package org.bibletranslationtools.resourcecatalog.library.models
 
 import org.bibletranslationtools.resourcecontainer.Language
 
@@ -18,4 +18,4 @@ data class SourceLanguage(
     constructor(language: Language) : this(language.slug, language.name, language.direction)
 }
 
-fun SourceLanguage.toLanguage() = Language(slug, name, direction)
+fun SourceLanguage.toRcLanguage() = Language(slug, name, direction)

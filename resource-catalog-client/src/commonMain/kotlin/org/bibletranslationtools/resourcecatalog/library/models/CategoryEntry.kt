@@ -1,4 +1,4 @@
-package org.bibletranslationtools.resourcecatalog.models
+package org.bibletranslationtools.resourcecatalog.library.models
 
 /**
  * Represents a single entry in the list of project/categories

@@ -1,4 +1,4 @@
-package org.bibletranslationtools.resourcecatalog.models
+package org.bibletranslationtools.resourcecatalog.api.models
 
 import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
@@ -10,13 +10,4 @@ internal data class LanguageCatalog(
     @SerialName("res_catalog")
     val resourceUrl: String,
     val resources: List<ResourceCatalog> = emptyList()
-)
-
-@Serializable
-internal data class Language(
-    val slug: String,
-    val name: String,
-    val direction: String,
-    @SerialName("date_modified")
-    val modifiedAt: Int
 )

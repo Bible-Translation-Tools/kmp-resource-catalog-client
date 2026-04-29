@@ -1,4 +1,4 @@
-package org.bibletranslationtools.resourcecatalog.models
+package org.bibletranslationtools.resourcecatalog.api.models
 
 import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
@@ -13,12 +13,4 @@ internal data class ProjectCatalog(
     val meta: List<String>,
     val sort: String,
     val languages: List<LanguageCatalog> = emptyList()
-)
-
-@Serializable
-internal data class Project(
-    val name: String,
-    val desc: String,
-    val meta: List<String>,
-    val sort: String
 )

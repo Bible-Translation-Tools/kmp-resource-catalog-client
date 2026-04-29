@@ -1,419 +1,558 @@
 package org.bibletranslationtools.resourcecatalog
 
-import app.cash.sqldelight.db.SqlDriver
-import org.bibletranslationtools.resourcecatalog.models.Catalog
-import org.bibletranslationtools.resourcecatalog.models.Category
-import org.bibletranslationtools.resourcecatalog.models.CategoryEntry
-import org.bibletranslationtools.resourcecatalog.models.ChunkMarker
-import org.bibletranslationtools.resourcecatalog.models.SourceLanguage
-import org.bibletranslationtools.resourcecatalog.models.TargetLanguage
-import org.bibletranslationtools.resourcecatalog.models.Translation
-import org.bibletranslationtools.resourcecatalog.models.Versification
+import io.ktor.client.HttpClient
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
+import org.bibletranslationtools.logger.Logger
+import org.bibletranslationtools.resourcecatalog.api.Api
+import org.bibletranslationtools.resourcecatalog.api.models.LanguageCatalog
+import org.bibletranslationtools.resourcecatalog.api.models.ProjectCatalog
+import org.bibletranslationtools.resourcecatalog.api.models.ResourceCatalog
+import org.bibletranslationtools.resourcecatalog.api.models.toRcStatus
+import org.bibletranslationtools.resourcecatalog.library.Index
+import org.bibletranslationtools.resourcecatalog.library.Library
+import org.bibletranslationtools.resourcecatalog.library.models.Catalog
+import org.bibletranslationtools.resourcecatalog.library.models.Category
+import org.bibletranslationtools.resourcecatalog.library.models.SourceLanguage
+import org.bibletranslationtools.resourcecatalog.library.models.Versification
+import org.bibletranslationtools.resourcecatalog.library.models.toRcLanguage
+import org.bibletranslationtools.resourcecontainer.ContainerTools
+import org.bibletranslationtools.resourcecontainer.PackageInfo
 import org.bibletranslationtools.resourcecontainer.Project
-import org.bibletranslationtools.resourcecontainer.Resource
+import org.bibletranslationtools.resourcecontainer.ResourceContainer
+import org.bibletranslationtools.resourcecontainer.errors.InvalidRCException
+import org.bibletranslationtools.resourcecontainer.errors.MissingRCException
+import java.io.File
+import org.bibletranslationtools.resourcecontainer.Resource as RcResource
 
-object CatalogClient {
+class CatalogClient(
+    private val databasePath: String,
+    private val resourceDir: File,
+    httpClient: HttpClient = Api.defaultHttpClient()
+) {
 
-    private lateinit var driver: SqlDriver
-    internal lateinit var library: Library
+    private val api = Api(httpClient)
+    lateinit var library: Index
+        private set
 
-    fun open(databasePath: String) {
-        driver = createDatabaseDriver(databasePath)
-        library = Library(driver)
+    private val sourceCatalogs = mutableListOf<Catalog>()
+
+    // Single-threaded dispatcher for all database operations. Guarantees
+    // serial access and prevents connection starvation across coroutines.
+    private val dbDispatcher = Dispatchers.IO.limitedParallelism(1)
+
+    // Separate dispatcher for network I/O so downloads never hold a
+    // database transaction open.
+    private val networkDispatcher = Dispatchers.IO
+
+    fun open() {
+        library = Library(databasePath)
     }
 
-    fun close() {
-        driver.close()
+    /**
+     * Closes the database connection. The client must not be used after this.
+     */
+    fun close() = library.closeDatabase()
+
+    fun setSourceCatalogs(catalogs: List<Catalog>) {
+        sourceCatalogs.clear()
+        sourceCatalogs.addAll(catalogs)
     }
 
-    /**
-     * Returns a source language.
-     *
-     * @param slug
-     * @return the language object or null if it does not exist
-     */
-    fun getSourceLanguage(slug: String) = library.getSourceLanguage(slug)
+    suspend fun updateSources(
+        url: String,
+        onProgress: (Float, String?) -> Unit = { _, _ -> }
+    ) {
+        val projects = withContext(networkDispatcher) {
+            api.fetchSources(url, onProgress)
+        }
+        withTransaction {
+            indexSources(projects)
+        }
+    }
 
-    /**
-     * Returns a list of every source language.
-     *
-     * @return an array of source languages
-     */
-    fun getSourceLanguages() = library.getSourceLanguages()
+    private fun indexSources(projects: List<ProjectCatalog>) {
+        for (projectCatalog in projects) {
+            for (languageCatalog in projectCatalog.languages) {
+                val lang = languageCatalog.language
+                val languageId = library.addSourceLanguage(
+                    SourceLanguage(lang.slug, lang.name, lang.direction)
+                )
+                library.addVersification(Versification("en-US", "American English"), languageId)
 
-    /**
-     * Returns a list of source languages in which the project exists.
-     *
-     * @return an array of source languages
-     */
-    fun getSourceLanguages(projectSlug: String) = library.getSourceLanguages(projectSlug)
+                val categories = projectCatalog.meta.zip(languageCatalog.project.meta)
+                    .map { (slug, name) -> Category(slug, name) }
 
-    /**
-     * Returns a list of source languages and when they were last modified.
-     * The value is taken from the max modified resource format date within the language
-     *
-     * @return {slug, modified_at}
-     */
-    fun listSourceLanguagesLastModified(): List<Map<String, Int>> = library.listSourceLanguagesLastModified()
+                val project = Project(
+                    slug = projectCatalog.slug,
+                    name = languageCatalog.project.name,
+                    sort = projectCatalog.sort.toInt(),
+                    description = languageCatalog.project.desc,
+                    chunksUrl = languageCatalog.resources.firstOrNull()?.chunksUrl ?: ""
+                )
+                val projectId = library.addProject(project, categories, languageId)
 
-    /**
-     * Inserts or updates a source language in the library.
-     *
-     * @param language
-     * @return the id of the source language row
-     */
-    fun addSourceLanguage(language: SourceLanguage): Long = library.addSourceLanguage(language)
+                for (rc in languageCatalog.resources) {
+                    indexResource(projectCatalog, languageCatalog, rc, projectId, languageId)
+                }
+            }
+        }
+    }
 
-    /**
-     * Returns a target language.
-     * The result may be a temp target language.
-     *
-     * Note: does not include the row id. You don't need it
-     *
-     * @param slug
-     * @return the language object or null if it does not exist
-     */
-    fun getTargetLanguage(slug: String) = library.getTargetLanguage(slug)
-
-    /**
-     * Returns a list of every target language.
-     * The result may include temp target languages.
-     *
-     * Note: does not include the row id. You don't need it.
-     * And we are pulling from two tables so it would be confusing.
-     *
-     * @return
-     */
-    fun getTargetLanguages() = library.getTargetLanguages()
-
-    /**
-     * Searches for a target language by name.
-     * @param query
-     * @return
-     */
-    fun findTargetLanguage(query: String) = library.findTargetLanguage(query)
-
-    /**
-     * Returns the target language that has been assigned to a temporary target language.
-     *
-     * Note: does not include the row id. You don't need it
-     *
-     * @param tempTargetLanguageSlug the temporary target language with the assignment
-     * @return the language object or null if it does not exist
-     */
-    fun getApprovedTargetLanguage(
-        tempTargetLanguageSlug: String
-    ): TargetLanguage? = library.getApprovedTargetLanguage(tempTargetLanguageSlug)
-
-    /**
-     * Inserts or updates a target language in the library.
-     * Note: the result is boolean since you don't need the row id. See getTargetLanguages for more information
-     *
-     * @param language
-     * @return
-     */
-    fun addTargetLanguage(language: TargetLanguage): Boolean = library.addTargetLanguage(language)
-
-    /**
-     * Deletes all target languages
-     */
-    fun clearTargetLanguages() = library.clearTargetLanguages()
-
-    /**
-     * Inserts or updates a temporary target language in the library.
-     *
-     * Note: the result is boolean since you don't need the row id. See getTargetLanguages for more information
-     *
-     * @param language
-     * @return
-     */
-    fun addTempTargetLanguage(
-        language: TargetLanguage
-    ): Boolean = library.addTempTargetLanguage(language)
-
-    /**
-     * Maps approved target language to temporary language
-     *
-     * @param tempTargetLanguageSlug temporary target language slug
-     * @param targetLanguageSlug approved target language slug
-     */
-    fun setApprovedTargetLanguage(
-        tempTargetLanguageSlug: String,
-        targetLanguageSlug: String
-    ) = library.setApprovedTargetLanguage(tempTargetLanguageSlug, targetLanguageSlug)
-
-    /**
-     * Deletes all temporary languages
-     */
-    fun clearTempLanguages() = library.clearTempLanguages()
-
-    /**
-     * Unassociates all approved languages from temporary languages
-     */
-    fun clearApprovedTempLanguages() = library.clearApprovedTempLanguages()
-
-    /**
-     * Returns a project with the option of falling back to a default language if not found
-     *
-     * @param languageSlug the source language code for which the project will be returned
-     * @param projectSlug the project code
-     * @param enableDefaultLanguage allows this method to use the default language if no project is found in this language
-     * @return the project object or null
-     */
-    fun getProject(
-        languageSlug: String,
-        projectSlug: String,
-        enableDefaultLanguage: Boolean = false
-    ) = library.getProject(languageSlug, projectSlug, enableDefaultLanguage)
-
-    /**
-     * Returns a list of projects in the given language or (if enabled) a default language.
-     * The affect is a list of all unique projects with preference given to the specified language
-     *
-     * @param languageSlug the source language code for which projects will be returned
-     * @param enableDefaultLanguage if true the default language will be used to fetch the remaining projects
-     * @return an array of projects that are available in the source language
-     */
-    fun getProjects(
-        languageSlug: String,
-        enableDefaultLanguage: Boolean = true
-    ) = library.getProjects(languageSlug, enableDefaultLanguage)
-
-    /**
-     * Check if a project exists by this slug
-     *
-     * @param projectSlug project slug
-     */
-    fun getProjectExists(projectSlug: String): Boolean = library.getProjectExists(projectSlug)
-
-    /**
-     * Returns an array of categories that exist underneath the parent category.
-     * The results of this method are a combination of categories and projects.
-     *
-     * @param parentCategoryId the category whose children will be returned. If 0 then all top level categories will be returned.
-     * @param languageSlug the language in which the category titles will be displayed
-     * @param translateMode limit the results to just those with the given translate mode.
-     * @return
-     */
-    fun getProjectCategories(
-        parentCategoryId: Long,
-        languageSlug: String,
-        translateMode: String?
-    ): List<CategoryEntry> = library.getProjectCategories(parentCategoryId, languageSlug, translateMode)
-
-    /**
-     * Returns a list of projects and when they were last modified
-     * The value is taken from the max modified resource format date within the project
-     *
-     * @param languageSlug the source language whose projects will be selected.
-     * If left empty the results will include all projects in all languages.
-     * @return
-     */
-    fun listProjectsLastModified(
-        languageSlug: String?
-    ): Map<String, Int> = library.listProjectsLastModified(languageSlug)
-
-    /**
-     * Inserts or updates a project in the library
-     *
-     * @param project
-     * @param categories this is the category branch that the project will attach to
-     * @param languageId the parent source language row id
-     * @return the id of the project row
-     */
-    fun addProject(
-        project: Project,
-        categories: List<Category>,
+    private fun indexResource(
+        projectCatalog: ProjectCatalog,
+        languageCatalog: LanguageCatalog,
+        rc: ResourceCatalog,
+        projectId: Long,
         languageId: Long
-    ): Long = library.addProject(project, categories, languageId)
+    ) {
+        val translateMode = when (rc.slug.lowercase()) {
+            "obs", "ulb" -> "all"
+            else -> "gl"
+        }
+
+        val mainResource = RcResource(
+            slug = rc.slug,
+            name = rc.name,
+            type = "book",
+            status = rc.status.toRcStatus(translateMode)
+        ).apply {
+            addLegacyData(Index.LEGACY_WORDS_ASSIGNMENTS_URL, rc.twCatUrl)
+            addFormat(RcResource.Format(
+                ResourceContainer.VERSION,
+                ContainerTools.typeToMime("book"),
+                rc.modifiedAt.toInt(),
+                rc.sourceUrl,
+                false
+            ))
+        }
+        library.addResource(mainResource, projectId)
+
+        if (rc.notesUrl.isNotEmpty()) {
+            val tnResource = RcResource(
+                slug = "tn",
+                name = "translationNotes",
+                type = "help",
+                status = rc.status.toRcStatus(
+                    "gl", listOf(
+                        RcResource.SourceTranslation(
+                            languageCatalog.language.slug,
+                            "tn",
+                            mainResource.status.version
+                        )
+                    )
+                )
+            ).apply {
+                addFormat(RcResource.Format(
+                    ResourceContainer.VERSION,
+                    ContainerTools.typeToMime("help"),
+                    rc.modifiedAt.toInt(),
+                    rc.notesUrl,
+                    false
+                ))
+            }
+            library.addResource(tnResource, projectId)
+        }
+
+        if (rc.questionsUrl.isNotEmpty()) {
+            val tqResource = RcResource(
+                slug = "tq",
+                name = "translationQuestions",
+                type = "help",
+                status = rc.status.toRcStatus(
+                    "gl", listOf(
+                        RcResource.SourceTranslation(
+                            languageCatalog.language.slug,
+                            "tq",
+                            mainResource.status.version
+                        )
+                    )
+                )
+            ).apply {
+                addFormat(RcResource.Format(
+                    ResourceContainer.VERSION,
+                    ContainerTools.typeToMime("help"),
+                    rc.modifiedAt.toInt(),
+                    rc.questionsUrl,
+                    false
+                ))
+            }
+            library.addResource(tqResource, projectId)
+        }
+
+        if (rc.termsUrl.isNotEmpty()) {
+            val isObs = projectCatalog.slug == "obs"
+            val twProjectSlug = if (isObs) "bible-obs" else "bible"
+            val twProjectName = "translationWords" + if (isObs) " OBS" else ""
+            val twProjectId = library.addProject(
+                Project(twProjectSlug, twProjectName, 100),
+                emptyList(),
+                languageId
+            )
+            val twResource = RcResource(
+                slug = "tw",
+                name = "translationWords",
+                type = "dict",
+                status = rc.status.toRcStatus("gl", listOf(
+                    RcResource.SourceTranslation(languageCatalog.language.slug, "tw", mainResource.status.version)
+                ))
+            ).apply {
+                addFormat(RcResource.Format(
+                    ResourceContainer.VERSION,
+                    ContainerTools.typeToMime("dict"),
+                    rc.modifiedAt.toInt(),
+                    rc.termsUrl,
+                    false
+                ))
+            }
+            library.addResource(twResource, twProjectId)
+        }
+    }
 
     /**
-     * Returns a resource
+     * Downloads and indexes chunk markers for all projects that have a chunks URL.
      *
-     * @param languageSlug the source language slug
-     * @param projectSlug the project slug
-     * @param resourceSlug the resource slug
-     * @return the Resource object or null if it does not exist
+     * Network and DB phases are fully separated:
+     * 1. Collect chunk URLs from the DB.
+     * 2. Download all chunk data over the network.
+     * 3. Write everything in a single transaction.
      */
-    fun getResource(
+    @Throws(Exception::class)
+    suspend fun updateChunks(onProgress: (Float, String?) -> Unit = { _, _ -> }) {
+        val (chunkUrls, versificationRowId) = withContext(dbDispatcher) {
+            val urls = library.getSourceLanguages()
+                .flatMap { library.getProjects(it.slug) }
+                .filter { it.chunksUrl.isNotEmpty() }
+                .associate { it.slug to it.chunksUrl }
+            val rowId = library.getVersification("en", "en-US")?.rowId
+            urls to rowId
+        }
+
+        if (versificationRowId == null) {
+            Logger.w(this::javaClass.name, "Unknown versification while downloading chunks")
+            return
+        }
+
+        val chunks = withContext(networkDispatcher) {
+            api.fetchChunks(chunkUrls, onProgress)
+        }
+
+        withTransaction {
+            for ((slug, markers) in chunks) {
+                for (marker in markers) {
+                    library.addChunkMarker(marker, slug, versificationRowId)
+                }
+            }
+        }
+    }
+
+    /**
+     * Updates all global catalogs (languages, temp languages, approvals).
+     *
+     * @param force if true, re-injects global catalog URLs into the DB first
+     */
+    @Throws(Exception::class)
+    suspend fun updateCatalogs(
+        force: Boolean,
+        onProgress: (Float, String?) -> Unit = { _, _ -> }
+    ) {
+        if (force) {
+            withContext(dbDispatcher) {
+                sourceCatalogs.forEach { library.addCatalog(it) }
+            }
+        }
+        val catalogs = withContext(dbDispatcher) { library.getCatalogs() }
+        for (catalog in catalogs) {
+            updateCatalog(catalog.slug, catalog.url, onProgress)
+        }
+    }
+
+    @Throws(Exception::class)
+    private suspend fun updateCatalog(
+        slug: String,
+        url: String,
+        onProgress: (Float, String?) -> Unit
+    ) {
+        val data = withContext(networkDispatcher) { api.fetchCatalog(url) }
+
+        when (slug) {
+            "langnames" -> {
+                val languages = api.parseTargetLanguages(data)
+                library.clearTargetLanguages()
+
+                withTransaction {
+                    languages.forEachIndexed { i, language ->
+                        if (!library.addTargetLanguage(language)) {
+                            Logger.w(this::javaClass.name, "Failed to add target language: ${language.slug}")
+                        }
+                        onProgress(i / languages.size.toFloat(), slug)
+                    }
+                }
+            }
+            "new-language-questions" -> { /* not implemented */ }
+            "temp-langnames" -> {
+                val languages = api.parseTargetLanguages(data)
+                library.clearTempLanguages()
+
+                withTransaction {
+                    languages.forEachIndexed { i, language ->
+                        if (!library.addTempTargetLanguage(language)) {
+                            Logger.w(this::javaClass.name, "Failed to add temp language: ${language.slug}")
+                        }
+                        onProgress((i + 1) / languages.size.toFloat(), slug)
+                    }
+                }
+            }
+            "approved-temp-langnames" -> {
+                val approvals = api.parseApprovedTempLanguages(data)
+                library.clearApprovedTempLanguages()
+                withTransaction {
+                    approvals.forEachIndexed { i, (tempSlug, approvedSlug) ->
+                        if (!library.setApprovedTargetLanguage(tempSlug, approvedSlug)) {
+                            Logger.w(this::javaClass.name, "Failed to approve temp language: $tempSlug as $approvedSlug")
+                        }
+                        onProgress((i + 1) / approvals.size.toFloat(), slug)
+                    }
+                }
+            }
+            else -> throw Exception("Catalog '$slug' is not supported")
+        }
+    }
+
+    /**
+     * Downloads a resource container and converts it from the legacy format.
+     */
+    @Throws(Exception::class)
+    suspend fun downloadResourceContainer(
+        sourceLanguageSlug: String,
+        projectSlug: String,
+        resourceSlug: String
+    ): ResourceContainer {
+        // Read everything from DB first
+        val (format, containerSlug, packageInfo, legacyUrl) = withContext(dbDispatcher) {
+            val resource = library.getResource(sourceLanguageSlug, projectSlug, resourceSlug)
+                ?: throw Exception("Unknown resource: ${sourceLanguageSlug}_${projectSlug}_$resourceSlug")
+            val fmt = Api.getResourceContainerFormat(resource.formats)
+                ?: throw Exception("Missing resource container format")
+            val slug = ContainerTools.makeSlug(sourceLanguageSlug, projectSlug, resourceSlug)
+            val language = library.getSourceLanguage(sourceLanguageSlug)
+                ?: throw Exception("Missing language: $sourceLanguageSlug")
+            val project = library.getProject(sourceLanguageSlug, projectSlug)
+                ?: throw Exception("Missing project: $projectSlug")
+            val categories = library.getCategories(sourceLanguageSlug, projectSlug)
+            val mimeType = if (project.slug != "obs" && resource.type == "book") {
+                "text/usx"
+            } else "text/markdown"
+            val info = PackageInfo(
+                packageVersion = ResourceContainer.VERSION,
+                modifiedAt = fmt.modifiedAt,
+                contentMimeType = mimeType,
+                language = language.toRcLanguage(),
+                project = project.copy(categories = categories.map { it.slug }),
+                resource = resource
+            )
+            val url = resource.legacyData[Index.LEGACY_WORDS_ASSIGNMENTS_URL] as? String ?: ""
+            Quadruple(fmt, slug, info, url)
+        }
+
+        val destFile = File(resourceDir, "$containerSlug.${ResourceContainer.FILE_EXTENSION}")
+        val containerDir = File(resourceDir, containerSlug)
+        FileUtil.deleteQuietly(destFile)
+        FileUtil.deleteQuietly(containerDir)
+
+        // All network calls together, outside any transaction
+        val (rawData, wordAssignments) = withContext(networkDispatcher) {
+            api.downloadResourceContainer(format.url, destFile)
+            val content = FileUtil.readFileToString(destFile)
+            FileUtil.deleteQuietly(destFile)
+
+            val assignments = try {
+                api.fetchWordAssignments(legacyUrl)
+                    ?.let { ContainerTools.decodeWordAssignments(it) }
+            } catch (e: Exception) {
+                Logger.w(this::javaClass.name, e.message ?: e.toString())
+                null
+            }
+            content to assignments
+        }
+
+        val content = ContainerTools.decodeContent(
+            rawData,
+            packageInfo.resource.type,
+            packageInfo.resource.slug
+        )
+
+        return ContainerTools.convertResource(
+            content,
+            packageInfo,
+            wordAssignments,
+            containerDir
+        )
+    }
+
+    /**
+    * Copies a valid resource container into the resource directory and indexes it.
+    * The container must be open (uncompressed). Existing containers are overwritten.
+    */
+    @Throws(Exception::class)
+    suspend fun importResourceContainer(directory: File): ResourceContainer {
+        val rc = ResourceContainer.load(directory)
+
+        withContext(dbDispatcher) {
+            if (!library.getProjectExists(rc.project.slug)) {
+                throw InvalidRCException("Unsupported project")
+            }
+        }
+
+        deleteResourceContainer(rc.slug)
+        FileUtil.copyDirectory(
+            directory,
+            File(resourceDir, rc.slug),
+            null
+        )
+
+        withTransaction {
+            val languageId = library.addSourceLanguage(SourceLanguage(rc.language))
+            val categories = buildList {
+                try {
+                    rc.info.project.categories.forEach { slug ->
+                        val name = library.getCategory(
+                            rc.language.slug,
+                            slug
+                        )?.name ?: slug
+                        add(Category(slug, name))
+                    }
+                } catch (e: Exception) {
+                    e.printStackTrace()
+                }
+            }
+            val projectId = library.addProject(rc.project, categories, languageId)
+            rc.resource.addFormat(
+                RcResource.Format(
+                    packageVersion = rc.info.packageVersion,
+                    mimeType = rc.resource.type,
+                    modifiedAt = rc.modifiedAt,
+                    url = "",
+                    imported = true
+                )
+            )
+            library.addResource(rc.resource, projectId)
+        }
+
+        return openResourceContainer(
+            rc.language.slug,
+            rc.project.slug,
+            rc.resource.slug
+        )
+    }
+
+    /**
+     * Exports a closed resource container to [destFile].
+     */
+    @Throws(Exception::class)
+    fun exportResourceContainer(
+        destFile: File,
         languageSlug: String,
         projectSlug: String,
         resourceSlug: String
-    ) = library.getResource(languageSlug, projectSlug, resourceSlug)
+    ) {
+        val slug = ContainerTools.makeSlug(languageSlug, projectSlug, resourceSlug)
+        val srcDir = File(resourceDir, slug)
+        val srcFile = File("$srcDir.${ResourceContainer.FILE_EXTENSION}")
+        if (!srcFile.exists() && srcDir.isDirectory) ResourceContainer.close(srcDir)
+        if (!srcFile.exists()) throw MissingRCException("Resource container not found at $srcFile")
+        FileUtil.copyFile(srcFile, destFile)
+    }
+
+    /** Opens a resource container archive so its contents can be read. */
+    @Throws(Exception::class)
+    fun openResourceContainer(
+        sourceLanguageSlug: String,
+        projectSlug: String,
+        resourceSlug: String
+    ): ResourceContainer {
+        library.getResource(sourceLanguageSlug, projectSlug, resourceSlug)
+            ?: throw Exception("Unknown resource")
+        return openResourceContainer(
+            ContainerTools.makeSlug(sourceLanguageSlug, projectSlug, resourceSlug)
+        )
+    }
 
     /**
-     * Returns a list of resources available in the given project
-     *
-     * @param languageSlug the source language of the resource. If null then all resources of the project will be returned.
-     * @param projectSlug the project whose resources will be returned
-     * @return
+     * Opens a resource container archive by slug without validating against
+     * the index.
      */
-    fun getResources(
-        languageSlug: String?,
-        projectSlug: String
-    ) = library.getResources(languageSlug, projectSlug)
+    @Throws(Exception::class)
+    fun openResourceContainer(containerSlug: String): ResourceContainer {
+        val directory = File(resourceDir, containerSlug)
+        val archive = File("$directory.${ResourceContainer.FILE_EXTENSION}")
+        return try {
+            if (directory.exists() && directory.isDirectory) {
+                ResourceContainer.load(directory)
+            }
+            else ResourceContainer.open(archive, directory)
+        } catch (_: Exception) {
+            ResourceContainer.open(archive, directory)
+        }
+    }
 
-    /**
-     * Inserts or updates a resource in the library.
-     *
-     * @param resource the resource being indexed
-     * @param projectId the parent project row id
-     * @return the id of the resource row
-     */
-    fun addResource(
-        resource: Resource,
-        projectId: Long
-    ): Long = library.addResource(resource, projectId)
+    /** Closes a resource container archive. */
+    @Throws(Exception::class)
+    fun closeResourceContainer(
+        sourceLanguageSlug: String,
+        projectSlug: String,
+        resourceSlug: String
+    ): File {
+        library.getResource(sourceLanguageSlug, projectSlug, resourceSlug)
+            ?: throw Exception("Unknown resource")
 
-    /**
-     * Returns a translation that matches the resource container slug
-     *
-     * @param containerSlug
-     * @return
-     */
-    fun getTranslation(containerSlug: String) = library.getTranslation(containerSlug)
+        val rcSlug = ContainerTools.makeSlug(sourceLanguageSlug, projectSlug, resourceSlug)
 
-    /**
-     * Returns a list of translations available for the project
-     *
-     * @param languageSlug the language these translations are available in. Leave null for all.
-     * @param projectSlug the project for whom these translations are available. Leave null for all
-     * @param resourceSlug the resource for whom these translations are available. Leave null for all
-     * @param resourceType the resource type allowed for returned translations. Leave null for all.
-     * @param translateMode limit the results to just those with the given translate mode. Leave null for all
-     * @param minCheckingLevel the minimum checking level allowed for returned translations. Use 0 for no minimum
-     * @param maxCheckingLevel the maximum checking level allowed for returned translations. Use -1 for no maximum
-     * @return a list of matching translations
-     */
-    fun findTranslations(
-        languageSlug: String? = null,
-        projectSlug: String? = null,
-        resourceSlug: String? = null,
-        resourceType: String? = null,
-        translateMode: String? = null,
-        minCheckingLevel: Int = 0,
-        maxCheckingLevel: Int = -1
-    ) = library.findTranslations(
-        languageSlug,
-        projectSlug,
-        resourceSlug,
-        resourceType,
-        translateMode,
-        minCheckingLevel,
-        maxCheckingLevel
+        return ResourceContainer.close(File(resourceDir, rcSlug))
+    }
+
+    /** Returns when a resource container was last modified, or -1 if unknown. */
+    fun getResourceContainerLastModified(
+        sourceLanguageSlug: String,
+        projectSlug: String,
+        resourceSlug: String
+    ): Int {
+        val resource = library.getResource(sourceLanguageSlug, projectSlug, resourceSlug)
+            ?: return -1
+        return Api.getResourceContainerFormat(resource.formats)?.modifiedAt ?: -1
+    }
+
+    /** Returns true if the resource container exists on disk. */
+    fun resourceContainerExists(containerSlug: String): Boolean {
+        val directory = File(resourceDir, containerSlug)
+        val archive = File("$directory.${ResourceContainer.FILE_EXTENSION}")
+        return (directory.exists() && directory.isDirectory) || (archive.exists() && archive.isFile)
+    }
+
+    fun resourceContainerExists(
+        languageSlug: String,
+        projectSlug: String,
+        resourceSlug: String
+    ): Boolean = resourceContainerExists(
+        ContainerTools.makeSlug(languageSlug, projectSlug, resourceSlug)
     )
 
-    /**
-     * Returns a list of translations that have been manually imported by the user.
-     *
-     * @return a list of translations
-     */
-    fun getImportedTranslations(): List<Translation> = library.getImportedTranslations()
+    /** Deletes a resource container from disk. */
+    fun deleteResourceContainer(containerSlug: String) {
+        val directory = File(resourceDir, containerSlug)
+        val archive = File("$directory.${ResourceContainer.FILE_EXTENSION}")
+        if (directory.exists() && directory.isDirectory) FileUtil.deleteQuietly(directory)
+        if (archive.exists() && archive.isFile) FileUtil.deleteQuietly(archive)
+    }
 
     /**
-     * Returns a catalog
-     *
-     * @param slug Catalog slug
-     * @return the catalog object or null if it does not exist
+     * Runs [block] inside a database transaction on [dbDispatcher].
+     * Commits on success, rolls back on any exception.
      */
-    fun getCatalog(slug: String) = library.getCatalog(slug)
-
-    /**
-     * Returns a list of catalogs
-     * @return
-     */
-    fun getCatalogs() = library.getCatalogs()
-
-    /**
-     * Inserts or updates a catalog in the library.
-     *
-     * @param catalog
-     * @return the id of the catalog
-     */
-    fun addCatalog(catalog: Catalog): Long = library.addCatalog(catalog)
-
-    /**
-     * Returns the category with it's localized title.
-     * This will return null if there is no matching localized category.
-     * This does not necessarily mean the category does not exist.
-     *
-     * @param languageSlug the language slug in which the category title will be given
-     * @param categorySlug the category slug
-     * @return the category or null
-     */
-    fun getCategory(
-        languageSlug: String,
-        categorySlug: String
-    ): Category? = library.getCategory(languageSlug, categorySlug)
-
-    /**
-     * Returns a list of categories in a project
-     *
-     * @param languageSlug the language in which the category title will be given
-     * @param projectSlug the project slug
-     * @return a list of categories in the project
-     */
-    fun getCategories(
-        languageSlug: String,
-        projectSlug: String
-    ) = library.getCategories(languageSlug, projectSlug)
-
-    /**
-     * Returns a list of chunk markers for a project
-     *
-     * @param projectSlug
-     * @param versificationSlug
-     * @return
-     */
-    fun getChunkMarkers(
-        projectSlug: String,
-        versificationSlug: String
-    ) = library.getChunkMarkers(projectSlug, versificationSlug)
-
-    fun addChunkMarker(
-        chunk: ChunkMarker,
-        projectSlug: String,
-        versificationId: Long
-    ) = library.addChunkMarker(chunk, projectSlug, versificationId)
-
-    /**
-     * Returns a versification
-     *
-     * @param languageSlug the source language code for which the versification will be returned
-     * @param versificationSlug
-     * @return versification or null
-     */
-    fun getVersification(
-        languageSlug: String,
-        versificationSlug: String
-    ) = library.getVersification(languageSlug, versificationSlug)
-
-    /**
-     * Returns a list of versifications
-     *
-     * @param languageSlug the source language code for which versifications will be returned
-     * @return
-     */
-    fun getVersifications(
-        languageSlug: String
-    ) = library.getVersifications(languageSlug)
-
-    /**
-     * Inserts or updates a versification in the library.
-     *
-     * @param versification
-     * @param languageId the parent source language row id
-     * @return the id of the versification or -1
-     */
-    fun addVersification(
-        versification: Versification,
-        languageId: Long
-    ): Long = library.addVersification(versification, languageId)
-
-    /**
-     * Compacts the database file by reclaiming space left by deleted rows.
-     * This operation rewrites the entire database, so it may take a while
-     * on large databases and blocks all other database access during that time.
-     */
-    fun vacuum() = library.vacuum()
+    private suspend fun <T> withTransaction(block: () -> T): T =
+        withContext(dbDispatcher) {
+            library.transaction { block() }
+        }
 }
+
+private data class Quadruple<A, B, C, D>(val first: A, val second: B, val third: C, val fourth: D)

@@ -1,4 +1,4 @@
-package org.bibletranslationtools.resourcecatalog.models
+package org.bibletranslationtools.resourcecatalog.library.models
 
 import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable

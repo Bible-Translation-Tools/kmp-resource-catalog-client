@@ -1,4 +1,4 @@
-package org.bibletranslationtools.resourcecatalog.models
+package org.bibletranslationtools.resourcecatalog.library.models
 
 import org.bibletranslationtools.resourcecontainer.ContainerTools
 import org.bibletranslationtools.resourcecontainer.Language

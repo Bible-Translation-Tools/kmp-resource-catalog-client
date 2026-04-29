@@ -21,6 +21,7 @@ kotlin {
         commonMain {
             dependencies {
                 implementation "org.bibletranslationtools:resource-container:1.0.1"
+                implementation "org.bibletranslationtools:logger:3.0.1"
 
                 implementation "org.jetbrains.kotlinx:kotlinx-serialization-json:1.11.0"
 

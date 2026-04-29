@@ -1,15 +1,22 @@
-package org.bibletranslationtools.resourcecatalog
+package org.bibletranslationtools.resourcecatalog.library
 
 import app.cash.sqldelight.db.SqlDriver
-import org.bibletranslationtools.resourcecatalog.models.Catalog
-import org.bibletranslationtools.resourcecatalog.models.Category
-import org.bibletranslationtools.resourcecatalog.models.CategoryEntry
-import org.bibletranslationtools.resourcecatalog.models.ChunkMarker
-import org.bibletranslationtools.resourcecatalog.models.SourceLanguage
-import org.bibletranslationtools.resourcecatalog.models.TargetLanguage
-import org.bibletranslationtools.resourcecatalog.models.Translation
-import org.bibletranslationtools.resourcecatalog.models.Versification
-import org.bibletranslationtools.resourcecatalog.models.toLanguage
+import org.bibletranslationtools.resourcecatalog.Database
+import org.bibletranslationtools.resourcecatalog.FindMergedByName
+import org.bibletranslationtools.resourcecatalog.FindTranslations
+import org.bibletranslationtools.resourcecatalog.ImportedTranslations
+import org.bibletranslationtools.resourcecatalog.SelectMergedAll
+import org.bibletranslationtools.resourcecatalog.SelectMergedBySlug
+import org.bibletranslationtools.resourcecatalog.createDatabaseDriver
+import org.bibletranslationtools.resourcecatalog.library.models.Catalog
+import org.bibletranslationtools.resourcecatalog.library.models.Category
+import org.bibletranslationtools.resourcecatalog.library.models.CategoryEntry
+import org.bibletranslationtools.resourcecatalog.library.models.ChunkMarker
+import org.bibletranslationtools.resourcecatalog.library.models.SourceLanguage
+import org.bibletranslationtools.resourcecatalog.library.models.TargetLanguage
+import org.bibletranslationtools.resourcecatalog.library.models.Translation
+import org.bibletranslationtools.resourcecatalog.library.models.Versification
+import org.bibletranslationtools.resourcecatalog.library.models.toRcLanguage
 import org.bibletranslationtools.resourcecontainer.ContainerTools
 import org.bibletranslationtools.resourcecontainer.Language
 import org.bibletranslationtools.resourcecontainer.Project
@@ -20,13 +27,12 @@ import org.bibletranslationtools.resourcecontainer.ResourceContainer
  * Manages the indexed library content using SQLDelight.
  *
  * The driver is owned by the caller — typically constructed via
- * [createDatabaseDriver], which can copy a prepopulated database out of assets
+ * [org.bibletranslationtools.resourcecatalog.createDatabaseDriver], which can copy a prepopulated database out of assets
  * on first launch and point SQLDelight at it.
  */
-internal class Library(
-    private val driver: SqlDriver,
+internal class Library(databasePath: String) : Index {
+    private val driver: SqlDriver = createDatabaseDriver(databasePath)
     private val database: Database = Database(driver)
-) {
 
     // Generated query handles
     private val sourceLanguageQ = database.sourceLanguageQueries
@@ -48,11 +54,11 @@ internal class Library(
     /**
      * Run [body] inside a database transaction. Returns whatever [body] returns.
      */
-    fun <T> transaction(body: () -> T): T {
+    override fun <T> transaction(body: () -> T): T {
         return database.transactionWithResult { body() }
     }
 
-    fun closeDatabase() {
+    override fun closeDatabase() {
         driver.close()
     }
 
@@ -74,7 +80,7 @@ internal class Library(
     // ---- writes ---------------------------------------------------------------------------------
 
     @Throws(Exception::class)
-    fun addSourceLanguage(language: SourceLanguage): Long {
+    override fun addSourceLanguage(language: SourceLanguage): Long {
         validateNotEmpty(language.slug)
         validateNotEmpty(language.name)
         validateNotEmpty(language.direction)
@@ -90,7 +96,7 @@ internal class Library(
     }
 
     @Throws(Exception::class)
-    fun addTargetLanguage(language: TargetLanguage): Boolean {
+    override fun addTargetLanguage(language: TargetLanguage): Boolean {
         validateNotEmpty(language.slug)
         validateNotEmpty(language.name)
         validateNotEmpty(language.direction)
@@ -107,7 +113,7 @@ internal class Library(
     }
 
     @Throws(Exception::class)
-    fun addTempTargetLanguage(language: TargetLanguage): Boolean {
+    override fun addTempTargetLanguage(language: TargetLanguage): Boolean {
         validateNotEmpty(language.slug)
         validateNotEmpty(language.name)
         validateNotEmpty(language.direction)
@@ -124,7 +130,7 @@ internal class Library(
     }
 
     @Throws(Exception::class)
-    fun setApprovedTargetLanguage(tempTargetLanguageSlug: String, targetLanguageSlug: String): Boolean {
+    override fun setApprovedTargetLanguage(tempTargetLanguageSlug: String, targetLanguageSlug: String): Boolean {
         validateNotEmpty(tempTargetLanguageSlug)
         validateNotEmpty(targetLanguageSlug)
 
@@ -141,10 +147,10 @@ internal class Library(
     }
 
     @Throws(Exception::class)
-    fun addProject(
+    override fun addProject(
         project: Project,
         categories: List<Category>,
-        sourceLanguageId: Long
+        languageId: Long
     ): Long {
         validateNotEmpty(project.slug)
         validateNotEmpty(project.name)
@@ -163,7 +169,7 @@ internal class Library(
                 parentCategoryId = catId
 
                 categoryNameQ.upsert(
-                    source_language_id = sourceLanguageId,
+                    source_language_id = languageId,
                     category_id = parentCategoryId,
                     name = category.name
                 )
@@ -176,19 +182,19 @@ internal class Library(
                 icon = deNull(project.icon),
                 sort = project.sort.toLong(),
                 chunks_url = deNull(project.chunksUrl),
-                source_language_id = sourceLanguageId,
+                source_language_id = languageId,
                 category_id = parentCategoryId
             )
 
             projectQ.selectIdByLanguageIdAndSlug(
                 projectSlug = project.slug,
-                languageId = sourceLanguageId
+                languageId = languageId
             ).executeAsOne()
         }
     }
 
     @Throws(Exception::class)
-    fun addVersification(versification: Versification, sourceLanguageId: Long): Long {
+    override fun addVersification(versification: Versification, languageId: Long): Long {
         validateNotEmpty(versification.slug)
         validateNotEmpty(versification.name)
 
@@ -198,7 +204,7 @@ internal class Library(
                 ?: throw Exception("Invalid versification")
 
             versificationNameQ.upsert(
-                source_language_id = sourceLanguageId,
+                source_language_id = languageId,
                 versification_id = vId,
                 name = versification.name
             )
@@ -207,7 +213,7 @@ internal class Library(
     }
 
     @Throws(Exception::class)
-    fun addChunkMarker(chunk: ChunkMarker, projectSlug: String, versificationId: Long): Long {
+    override fun addChunkMarker(chunk: ChunkMarker, projectSlug: String, versificationId: Long): Long {
         validateNotEmpty(chunk.chapter)
         validateNotEmpty(chunk.verse)
         validateNotEmpty(projectSlug)
@@ -229,7 +235,7 @@ internal class Library(
     }
 
     @Throws(Exception::class)
-    fun addCatalog(catalog: Catalog): Long {
+    override fun addCatalog(catalog: Catalog): Long {
         validateNotEmpty(catalog.slug)
         validateNotEmpty(catalog.url)
 
@@ -244,7 +250,7 @@ internal class Library(
     }
 
     @Throws(Exception::class)
-    fun addResource(resource: Resource, projectId: Long): Long {
+    override fun addResource(resource: Resource, projectId: Long): Long {
         validateNotEmpty(resource.slug)
         validateNotEmpty(resource.name)
         validateNotEmpty(resource.type)
@@ -283,7 +289,7 @@ internal class Library(
                 )
             }
 
-            val legacyUrl = resource.legacyData[Api.LEGACY_WORDS_ASSIGNMENTS_URL] as? String
+            val legacyUrl = resource.legacyData[Index.LEGACY_WORDS_ASSIGNMENTS_URL] as? String
             if (!legacyUrl.isNullOrEmpty()) {
                 legacyResourceInfoQ.upsert(
                     translation_words_assignments_url = legacyUrl,
@@ -296,7 +302,7 @@ internal class Library(
 
     // ---- reads ----------------------------------------------------------------------------------
 
-    fun listSourceLanguagesLastModified(): List<Map<String, Int>> {
+    override fun listSourceLanguagesLastModified(): List<Map<String, Int>> {
         val pattern = "${ResourceContainer.BASE_MIME_TYPE}+%"
         return resourceFormatQ.sourceLanguagesLastModified(pattern)
             .executeAsList()
@@ -305,7 +311,7 @@ internal class Library(
             }
     }
 
-    fun listProjectsLastModified(languageSlug: String?): Map<String, Int> {
+    override fun listProjectsLastModified(languageSlug: String?): Map<String, Int> {
         val pattern = "${ResourceContainer.BASE_MIME_TYPE}+%"
         return resourceFormatQ.projectsLastModified(
             mimeTypePattern = pattern,
@@ -315,25 +321,25 @@ internal class Library(
         }
     }
 
-    fun getProjectExists(projectSlug: String): Boolean {
+    override fun getProjectExists(projectSlug: String): Boolean {
         return projectQ.selectIdBySlug(projectSlug)
             .executeAsOneOrNull() != null
     }
 
-    fun getTranslation(containerSlug: String): Translation? {
+    override fun getTranslation(containerSlug: String): Translation? {
         return try {
             val slugs = ContainerTools.explodeSlug(containerSlug)
             val l = getSourceLanguage(slugs[0])
             val p = getProject(slugs[0], slugs[1], false)
             val r = getResource(slugs[0], slugs[1], slugs[2])
-            if (l != null && p != null && r != null) Translation(l.toLanguage(), p, r) else null
+            if (l != null && p != null && r != null) Translation(l.toRcLanguage(), p, r) else null
         } catch (e: Exception) {
             e.printStackTrace()
             null
         }
     }
 
-    fun findTranslations(
+    override fun findTranslations(
         languageSlug: String?,
         projectSlug: String?,
         resourceSlug: String?,
@@ -353,7 +359,7 @@ internal class Library(
         ).executeAsList().map { row -> buildTranslationFromRow(row) }
     }
 
-    fun getImportedTranslations(): List<Translation> {
+    override fun getImportedTranslations(): List<Translation> {
         return resourceQ.importedTranslations().executeAsList().map { row ->
             buildTranslationFromRow(row)
         }
@@ -449,7 +455,7 @@ internal class Library(
             status = status
         ).apply {
             addLegacyData(
-                Api.LEGACY_WORDS_ASSIGNMENTS_URL,
+                Index.LEGACY_WORDS_ASSIGNMENTS_URL,
                 translationWordsAssignmentsUrl ?: ""
             )
         }
@@ -457,31 +463,31 @@ internal class Library(
         return Translation(l, p, r)
     }
 
-    fun getSourceLanguage(sourceLanguageSlug: String): SourceLanguage? =
-        sourceLanguageQ.selectBySlug(sourceLanguageSlug)
+    override fun getSourceLanguage(slug: String): SourceLanguage? =
+        sourceLanguageQ.selectBySlug(slug)
             .executeAsOneOrNull()
             ?.let { SourceLanguage(it.slug, it.name, it.direction) }
 
-    fun getSourceLanguages(): List<SourceLanguage> =
+    override fun getSourceLanguages(): List<SourceLanguage> =
         sourceLanguageQ.selectAllOrdered().executeAsList()
             .map { SourceLanguage(it.slug, it.name, it.direction) }
 
-    fun getSourceLanguages(projectSlug: String): List<SourceLanguage> =
+    override fun getSourceLanguages(projectSlug: String): List<SourceLanguage> =
         sourceLanguageQ.selectByProjectSlug(projectSlug).executeAsList()
             .map { SourceLanguage(it.slug, it.name, it.direction) }
 
-    fun getTargetLanguage(targetLanguageSlug: String): TargetLanguage? =
-        targetLanguageQ.selectMergedBySlug(targetLanguageSlug)
+    override fun getTargetLanguage(slug: String): TargetLanguage? =
+        targetLanguageQ.selectMergedBySlug(slug)
                 .executeAsOneOrNull()?.toTargetLanguage()
 
-    fun findTargetLanguage(nameQuery: String): List<TargetLanguage> {
+    override fun findTargetLanguage(query: String): List<TargetLanguage> {
         val results = targetLanguageQ
-            .findMergedByName("%${nameQuery.lowercase()}%")
+            .findMergedByName("%${query.lowercase()}%")
             .executeAsList()
             .map { it.toTargetLanguage() }
             .toMutableList()
 
-        val nameLower = nameQuery.lowercase()
+        val nameLower = query.lowercase()
         results.sortWith { lhs, rhs ->
             var lhId = lhs.slug
             var rhId = rhs.slug
@@ -494,10 +500,10 @@ internal class Library(
         return results
     }
 
-    fun getTargetLanguages(): List<TargetLanguage> =
+    override fun getTargetLanguages(): List<TargetLanguage> =
         targetLanguageQ.selectMergedAll().executeAsList().map { it.toTargetLanguage() }
 
-    fun getApprovedTargetLanguage(tempTargetLanguageSlug: String): TargetLanguage? =
+    override fun getApprovedTargetLanguage(tempTargetLanguageSlug: String): TargetLanguage? =
         targetLanguageQ.selectApprovedByTempSlug(tempTargetLanguageSlug)
             .executeAsOneOrNull()
             ?.let {
@@ -544,14 +550,14 @@ internal class Library(
             isGatewayLanguage = bool(is_gateway_language)
         )
 
-    fun getProject(
-        sourceLanguageSlug: String,
+    override fun getProject(
+        languageSlug: String,
         projectSlug: String,
         enableDefaultLanguage: Boolean
     ): Project? {
         val row = projectQ.selectByLanguageAndSlug(
             projectSlug = projectSlug,
-            languageSlug = sourceLanguageSlug
+            languageSlug = languageSlug
         ).executeAsOneOrNull()
 
         var project: Project? = row?.let {
@@ -562,7 +568,9 @@ internal class Library(
                 it.icon ?: "",
                 it.desc ?: "",
                 it.chunks_url ?: ""
-            ).apply { languageSlug = it.source_language_slug ?: "" }
+            ).apply {
+                this.languageSlug = it.source_language_slug ?: ""
+            }
         }
 
         if (project == null && enableDefaultLanguage) project = getProject("en", projectSlug, false)
@@ -570,13 +578,13 @@ internal class Library(
         return project
     }
 
-    fun getProjects(
-        sourceLanguageSlug: String,
+    override fun getProjects(
+        languageSlug: String,
         enableDefaultLanguage: Boolean
     ): List<Project> {
         return if (enableDefaultLanguage) {
             projectQ.selectByLanguageWithFallback(
-                preferredLanguageSlug = sourceLanguageSlug,
+                preferredLanguageSlug = languageSlug,
                 defaultLanguageSlug = "en"
             ).executeAsList().map { row ->
                 Project(
@@ -586,10 +594,10 @@ internal class Library(
                     row.icon ?: "",
                     row.desc ?: "",
                     row.chunks_url ?: ""
-                ).apply { languageSlug = row.source_language_slug ?: "" }
+                ).apply { this.languageSlug = row.source_language_slug ?: "" }
             }
         } else {
-            projectQ.selectByLanguageSlug(sourceLanguageSlug).executeAsList().map { row ->
+            projectQ.selectByLanguageSlug(languageSlug).executeAsList().map { row ->
                 Project(
                     row.slug,
                     row.name,
@@ -597,12 +605,12 @@ internal class Library(
                     row.icon ?: "",
                     row.desc ?: "",
                     row.chunks_url ?: ""
-                ).apply { languageSlug = sourceLanguageSlug }
+                ).apply { this.languageSlug = languageSlug }
             }
         }
     }
 
-    fun getProjectCategories(
+    override fun getProjectCategories(
         parentCategoryId: Long,
         languageSlug: String,
         translateMode: String?
@@ -677,15 +685,15 @@ internal class Library(
         return out
     }
 
-    fun getResource(
-        sourceLanguageSlug: String,
+    override fun getResource(
+        languageSlug: String,
         projectSlug: String,
         resourceSlug: String
     ): Resource? {
         val row = resourceQ.selectOneWithLegacy(
             resourceSlug = resourceSlug,
             projectSlug = projectSlug,
-            languageSlug = sourceLanguageSlug
+            languageSlug = languageSlug
         ).executeAsOneOrNull() ?: return null
 
         val status = Resource.Status(
@@ -703,18 +711,18 @@ internal class Library(
             status = status
         ).apply {
             addLegacyData(
-                Api.LEGACY_WORDS_ASSIGNMENTS_URL,
+                Index.LEGACY_WORDS_ASSIGNMENTS_URL,
                 row.translation_words_assignments_url ?: ""
             )
             attachFormats(this, row.id)
         }
     }
 
-    fun getResources(sourceLanguageSlug: String?, projectSlug: String): List<Resource> {
-        return if (!sourceLanguageSlug.isNullOrEmpty()) {
+    override fun getResources(languageSlug: String?, projectSlug: String): List<Resource> {
+        return if (!languageSlug.isNullOrEmpty()) {
             resourceQ.selectByProjectAndLanguage(
                 projectSlug = projectSlug,
-                languageSlug = sourceLanguageSlug
+                languageSlug = languageSlug
             ).executeAsList().map { row ->
                 Resource(
                     slug = row.slug,
@@ -726,7 +734,7 @@ internal class Library(
                     )
                 ).apply {
                     addLegacyData(
-                        Api.LEGACY_WORDS_ASSIGNMENTS_URL,
+                        Index.LEGACY_WORDS_ASSIGNMENTS_URL,
                         row.translation_words_assignments_url ?: ""
                     )
                     attachFormats(this, row.id)
@@ -744,7 +752,7 @@ internal class Library(
                     )
                 ).apply {
                     addLegacyData(
-                        Api.LEGACY_WORDS_ASSIGNMENTS_URL,
+                        Index.LEGACY_WORDS_ASSIGNMENTS_URL,
                         row.translation_words_assignments_url ?: ""
                     )
                     attachFormats(this, row.id)
@@ -767,18 +775,18 @@ internal class Library(
         }
     }
 
-    fun getCatalog(catalogSlug: String): Catalog? =
-        catalogQ.selectBySlug(catalogSlug).executeAsOneOrNull()?.let {
-            Catalog(catalogSlug, it.url, it.modified_at.toInt())
+    override fun getCatalog(slug: String): Catalog? =
+        catalogQ.selectBySlug(slug).executeAsOneOrNull()?.let {
+            Catalog(slug, it.url, it.modified_at.toInt())
         }
 
-    fun getCatalogs(): List<Catalog> =
+    override fun getCatalogs(): List<Catalog> =
         catalogQ.selectAll().executeAsList()
             .map { Catalog(it.slug, it.url, it.modified_at.toInt()) }
 
-    fun getVersification(sourceLanguageSlug: String, versificationSlug: String): Versification? =
+    override fun getVersification(languageSlug: String, versificationSlug: String): Versification? =
         versificationQ.selectByLanguageAndSlug(
-            languageSlug = sourceLanguageSlug,
+            languageSlug = languageSlug,
             versificationSlug = versificationSlug
         ).executeAsOneOrNull()?.let {
             Versification(it.slug ?: "", it.name).apply {
@@ -786,20 +794,20 @@ internal class Library(
             }
         }
 
-    fun getVersifications(sourceLanguageSlug: String): List<Versification> =
-        versificationQ.selectByLanguage(sourceLanguageSlug).executeAsList().map {
+    override fun getVersifications(languageSlug: String): List<Versification> =
+        versificationQ.selectByLanguage(languageSlug).executeAsList().map {
             Versification(it.slug ?: "", it.name).apply {
                 rowId = it.id ?: 0L
             }
         }
 
-    fun getChunkMarkers(projectSlug: String, versificationSlug: String): List<ChunkMarker> =
+    override fun getChunkMarkers(projectSlug: String, versificationSlug: String): List<ChunkMarker> =
         chunkMarkerQ.selectByProjectAndVersification(
             versificationSlug = versificationSlug,
             projectSlug = projectSlug
         ).executeAsList().map { ChunkMarker(it.chapter, it.verse) }
 
-    fun getCategory(languageSlug: String, categorySlug: String): Category? =
+    override fun getCategory(languageSlug: String, categorySlug: String): Category? =
         categoryQ.selectByLanguageAndSlug(
             categorySlug = categorySlug,
             languageSlug = languageSlug
@@ -811,7 +819,7 @@ internal class Library(
             languageSlug = languageSlug
         ).executeAsOneOrNull()?.let { Category(it.slug, it.name ?: "") }
 
-    fun getCategories(languageSlug: String, projectSlug: String): List<Category> {
+    override fun getCategories(languageSlug: String, projectSlug: String): List<Category> {
         val first = categoryQ.selectByProjectAndLanguage(
             projectSlug = projectSlug,
             languageSlug = languageSlug
@@ -829,21 +837,21 @@ internal class Library(
 
     // ---- maintenance ----------------------------------------------------------------------------
 
-    fun clearTargetLanguages() {
+    override fun clearTargetLanguages() {
         targetLanguageQ.deleteAll()
         vacuum()
     }
 
-    fun clearTempLanguages() {
+    override fun clearTempLanguages() {
         tempTargetLanguageQ.deleteAll()
         vacuum()
     }
 
-    fun clearApprovedTempLanguages() {
+    override fun clearApprovedTempLanguages() {
         tempTargetLanguageQ.clearApprovedSlugs()
     }
 
-    fun vacuum() {
+    override fun vacuum() {
         try {
             driver.execute(identifier = null, sql = "VACUUM", parameters = 0, binders = null)
         } catch (e: Exception) {
