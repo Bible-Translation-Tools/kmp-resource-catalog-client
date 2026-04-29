@@ -1,0 +1,13 @@
+CREATE TABLE legacy_resource_info (
+    id INTEGER NOT NULL PRIMARY KEY AUTOINCREMENT,
+    translation_words_assignments_url TEXT DEFAULT NULL,
+    resource_id INTEGER NOT NULL,
+    UNIQUE (resource_id),
+    FOREIGN KEY (resource_id) REFERENCES resource (id) ON DELETE CASCADE
+);
+
+upsert:
+INSERT INTO legacy_resource_info (translation_words_assignments_url, resource_id)
+VALUES (?, ?)
+ON CONFLICT(resource_id) DO UPDATE SET
+    translation_words_assignments_url = excluded.translation_words_assignments_url;

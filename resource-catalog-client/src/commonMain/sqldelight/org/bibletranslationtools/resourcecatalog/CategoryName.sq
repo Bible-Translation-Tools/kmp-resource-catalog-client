@@ -1,0 +1,22 @@
+CREATE TABLE category_name (
+    id INTEGER NOT NULL PRIMARY KEY AUTOINCREMENT,
+    source_language_id INTEGER NOT NULL,
+    category_id INTEGER NOT NULL,
+    name TEXT NOT NULL,
+    FOREIGN KEY (source_language_id) REFERENCES source_language (id),
+    FOREIGN KEY (category_id) REFERENCES category (id) ON DELETE CASCADE,
+    UNIQUE (source_language_id, category_id)
+);
+
+upsert:
+INSERT INTO category_name (source_language_id, category_id, name)
+VALUES (?, ?, ?)
+ON CONFLICT(source_language_id, category_id) DO UPDATE SET
+    name = excluded.name;
+
+selectByCategoryAndLanguagePattern:
+SELECT sl.slug AS source_language_slug, cn.name AS name
+FROM category_name AS cn
+LEFT JOIN source_language AS sl ON sl.id = cn.source_language_id
+WHERE sl.slug LIKE :languageSlug AND cn.category_id = :categoryId
+LIMIT 1;

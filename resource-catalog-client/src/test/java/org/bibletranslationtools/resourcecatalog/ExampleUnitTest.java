@@ -1,4 +1,4 @@
-package org.bibletranslationtools.resourcecatalogclient;
+package org.bibletranslationtools.resourcecatalog;
 
 import org.junit.Test;
 

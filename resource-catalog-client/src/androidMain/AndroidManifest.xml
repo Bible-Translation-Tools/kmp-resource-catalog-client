@@ -1,5 +1,5 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android"
-    package="org.bibletranslationtools.resourcecatalogclient">
+    package="org.bibletranslationtools.resourcecatalog">
 
     <uses-permission android:name="android.permission.INTERNET" />
 

@@ -1,0 +1,48 @@
+CREATE TABLE resource_format (
+    id INTEGER NOT NULL PRIMARY KEY AUTOINCREMENT,
+    package_version TEXT NOT NULL,
+    mime_type TEXT NOT NULL,
+    modified_at INTEGER NOT NULL DEFAULT 0,
+    imported INTEGER NOT NULL DEFAULT 0,
+    url TEXT NOT NULL,
+    resource_id INTEGER NOT NULL,
+    UNIQUE (mime_type, resource_id),
+    FOREIGN KEY (resource_id) REFERENCES resource (id) ON DELETE CASCADE
+);
+
+CREATE INDEX resource_format_mime_type ON resource_format(mime_type);
+
+upsert:
+INSERT INTO resource_format (
+    package_version, mime_type, modified_at, imported, url, resource_id
+)
+VALUES (?, ?, ?, ?, ?, ?)
+ON CONFLICT(mime_type, resource_id) DO UPDATE SET
+    package_version = excluded.package_version,
+    modified_at = excluded.modified_at,
+    imported = excluded.imported,
+    url = excluded.url;
+
+selectByResource:
+SELECT *
+FROM resource_format
+WHERE resource_id = ?;
+
+sourceLanguagesLastModified:
+SELECT sl.slug AS slug, MAX(rf.modified_at) AS modified_at
+FROM resource_format AS rf
+LEFT JOIN resource AS r ON r.id = rf.resource_id
+LEFT JOIN project AS p ON p.id = r.project_id
+LEFT JOIN source_language AS sl ON sl.id = p.source_language_id
+WHERE rf.mime_type LIKE :mimeTypePattern
+GROUP BY sl.slug;
+
+projectsLastModified:
+SELECT p.slug AS slug, MAX(rf.modified_at) AS modified_at
+FROM resource_format AS rf
+LEFT JOIN resource AS r ON r.id = rf.resource_id
+LEFT JOIN project AS p ON p.id = r.project_id
+LEFT JOIN source_language AS sl ON sl.id = p.source_language_id
+WHERE rf.mime_type LIKE :mimeTypePattern
+  AND sl.slug LIKE :languageSlug
+GROUP BY p.slug;

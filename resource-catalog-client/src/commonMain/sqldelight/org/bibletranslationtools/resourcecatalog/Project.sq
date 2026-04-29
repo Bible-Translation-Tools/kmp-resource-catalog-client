@@ -1,0 +1,131 @@
+CREATE TABLE project (
+    id INTEGER NOT NULL PRIMARY KEY AUTOINCREMENT,
+    slug TEXT NOT NULL,
+    name TEXT NOT NULL,
+    desc TEXT DEFAULT NULL,
+    icon TEXT DEFAULT NULL,
+    sort INTEGER NOT NULL DEFAULT 0,
+    chunks_url TEXT DEFAULT NULL,
+    source_language_id INTEGER NOT NULL,
+    category_id INTEGER NOT NULL DEFAULT 0,
+    UNIQUE (source_language_id, slug),
+    FOREIGN KEY (source_language_id) REFERENCES source_language (id) ON DELETE CASCADE
+);
+
+CREATE INDEX project_slug ON project(slug);
+CREATE INDEX project_category_id ON project(category_id);
+
+upsert:
+INSERT INTO project (
+    slug, name, desc, icon, sort, chunks_url, source_language_id, category_id
+)
+VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+ON CONFLICT(source_language_id, slug) DO UPDATE SET
+    name = excluded.name,
+    desc = excluded.desc,
+    icon = excluded.icon,
+    sort = excluded.sort,
+    chunks_url = excluded.chunks_url,
+    category_id = excluded.category_id;
+
+selectIdByLanguageAndSlug:
+SELECT id
+FROM project
+WHERE slug = :projectSlug
+  AND source_language_id = (SELECT id FROM source_language WHERE slug = :languageSlug)
+LIMIT 1;
+
+selectIdByLanguageIdAndSlug:
+SELECT id
+FROM project
+WHERE slug = :projectSlug
+  AND source_language_id = :languageId
+LIMIT 1;
+
+selectMetaBySlug:
+SELECT *
+FROM project
+WHERE slug = ?
+LIMIT 1;
+
+selectByLanguageAndSlug:
+SELECT p.*, sl.slug AS source_language_slug
+FROM project AS p
+LEFT JOIN source_language AS sl ON sl.id = p.source_language_id
+WHERE p.slug = :projectSlug
+  AND sl.slug LIKE :languageSlug
+LIMIT 1;
+
+selectByLanguageSlug:
+SELECT *
+FROM project
+WHERE source_language_id IN (SELECT id FROM source_language WHERE slug = ?)
+ORDER BY sort ASC;
+
+selectByLanguageWithFallback:
+SELECT p.*, sl.slug AS source_language_slug,
+    MAX(CASE sl.slug
+        WHEN :preferredLanguageSlug THEN 3
+        WHEN :defaultLanguageSlug THEN 2
+        ELSE 1
+    END) AS weight
+FROM project AS p
+LEFT JOIN source_language AS sl ON sl.id = p.source_language_id
+GROUP BY p.slug
+ORDER BY p.sort ASC;
+
+selectProjectCategoriesNoMode:
+SELECT id, slug, parent_id
+FROM category
+WHERE parent_id = :parentId
+GROUP BY slug;
+
+selectProjectCategoriesByMode:
+SELECT
+    c.id, c.slug, c.parent_id,
+    COUNT(p.id) AS num,
+    MAX(p.sort) AS csort
+FROM category AS c
+LEFT JOIN (
+    SELECT p.id, p.category_id, p.sort, COUNT(r.id) AS num
+    FROM project AS p
+    LEFT JOIN (
+        SELECT r.*, COUNT(rf.id) AS num_imported FROM resource AS r
+        LEFT JOIN resource_format AS rf ON rf.resource_id = r.id AND rf.imported = 1
+        GROUP BY r.id
+    ) AS r ON r.project_id = p.id
+        AND (r.translate_mode LIKE :translateMode OR r.num_imported > 0)
+    GROUP BY p.slug
+) p ON p.category_id = c.id AND p.num > 0
+WHERE c.parent_id = :parentId AND num > 0
+GROUP BY c.slug
+ORDER BY csort;
+
+selectProjectsInCategoryNoMode:
+SELECT p.id, p.slug, p.sort, p.name
+FROM project AS p
+WHERE p.category_id = :parentId
+GROUP BY p.slug
+ORDER BY p.sort ASC;
+
+selectProjectsInCategoryByMode:
+SELECT p.id, p.slug, p.sort, p.name, COUNT(r.id) AS num
+FROM project AS p
+LEFT JOIN (
+    SELECT r.*, COUNT(rf.id) AS num_imported FROM resource AS r
+    LEFT JOIN resource_format AS rf ON rf.resource_id = r.id AND rf.imported = 1
+    GROUP BY r.id
+) AS r ON r.project_id = p.id
+    AND (r.translate_mode LIKE :translateMode OR r.num_imported > 0)
+WHERE p.category_id = :parentId
+GROUP BY p.slug
+HAVING num > 0
+ORDER BY p.sort ASC;
+
+selectProjectNameByLanguage:
+SELECT sl.slug AS source_language_slug, p.name AS name
+FROM project AS p
+LEFT JOIN source_language AS sl ON sl.id = p.source_language_id
+WHERE sl.slug LIKE :languageSlug AND p.slug = :projectSlug
+ORDER BY sl.slug ASC
+LIMIT 1;

@@ -1,0 +1,43 @@
+CREATE TABLE temp_target_language (
+    id INTEGER NOT NULL PRIMARY KEY AUTOINCREMENT,
+    slug TEXT NOT NULL,
+    name TEXT NOT NULL,
+    anglicized_name TEXT DEFAULT NULL,
+    direction TEXT NOT NULL DEFAULT 'ltr',
+    region TEXT NOT NULL DEFAULT '',
+    is_gateway_language INTEGER NOT NULL DEFAULT 0,
+    approved_target_language_slug TEXT DEFAULT NULL,
+    UNIQUE (slug)
+);
+
+CREATE INDEX temp_target_language_slug ON temp_target_language(slug);
+CREATE INDEX temp_target_language_name ON temp_target_language(name);
+CREATE INDEX temp_target_language_approved_target_language_slug
+    ON temp_target_language(approved_target_language_slug);
+
+upsert:
+INSERT INTO temp_target_language (
+    slug, name, anglicized_name, direction, region, is_gateway_language
+)
+VALUES (?, ?, ?, ?, ?, ?)
+ON CONFLICT(slug) DO UPDATE SET
+    name = excluded.name,
+    anglicized_name = excluded.anglicized_name,
+    direction = excluded.direction,
+    region = excluded.region,
+    is_gateway_language = excluded.is_gateway_language;
+
+setApprovedSlug:
+UPDATE temp_target_language
+SET approved_target_language_slug = :targetSlug
+WHERE slug = :tempSlug;
+
+existsBySlug:
+SELECT COUNT(*) > 0 FROM temp_target_language WHERE slug = ?;
+
+clearApprovedSlugs:
+UPDATE temp_target_language
+SET approved_target_language_slug = NULL;
+
+deleteAll:
+DELETE FROM temp_target_language;

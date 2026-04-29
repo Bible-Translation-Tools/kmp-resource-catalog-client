@@ -1,0 +1,41 @@
+CREATE TABLE source_language (
+    id INTEGER NOT NULL PRIMARY KEY AUTOINCREMENT,
+    slug TEXT NOT NULL,
+    name TEXT NOT NULL,
+    direction TEXT NOT NULL DEFAULT 'ltr',
+    UNIQUE (slug)
+);
+
+CREATE INDEX source_language_slug ON source_language(slug);
+
+selectBySlug:
+SELECT *
+FROM source_language
+WHERE slug = ?
+LIMIT 1;
+
+selectAllOrdered:
+SELECT *
+FROM source_language
+ORDER BY slug ASC;
+
+selectByProjectSlug:
+SELECT *
+FROM source_language
+WHERE id IN (
+    SELECT source_language_id FROM project WHERE slug = ? GROUP BY source_language_id
+)
+ORDER BY slug ASC;
+
+upsert:
+INSERT INTO source_language (slug, name, direction)
+VALUES (?, ?, ?)
+ON CONFLICT(slug) DO UPDATE SET
+    name = excluded.name,
+    direction = excluded.direction;
+
+selectIdBySlug:
+SELECT id FROM source_language WHERE slug = ?;
+
+lastInsertRowId:
+SELECT last_insert_rowid();

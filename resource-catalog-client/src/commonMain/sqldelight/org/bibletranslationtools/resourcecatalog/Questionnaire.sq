@@ -1,0 +1,40 @@
+CREATE TABLE questionnaire (
+    id INTEGER NOT NULL PRIMARY KEY AUTOINCREMENT,
+    language_slug TEXT NOT NULL,
+    language_name TEXT NOT NULL,
+    language_direction TEXT NOT NULL DEFAULT 'ltr',
+    td_id INTEGER NOT NULL,
+    UNIQUE (td_id)
+);
+
+CREATE INDEX questionnaire_language_slug ON questionnaire(language_slug);
+
+selectAll:
+SELECT *
+FROM questionnaire;
+
+selectById:
+SELECT *
+FROM questionnaire
+WHERE id = ?;
+
+selectByTdId:
+SELECT *
+FROM questionnaire
+WHERE td_id = ?;
+
+selectByLanguageSlug:
+SELECT *
+FROM questionnaire
+WHERE language_slug = ?;
+
+insert:
+INSERT INTO questionnaire (language_slug, language_name, language_direction, td_id)
+VALUES (?, ?, ?, ?);
+
+deleteById:
+DELETE FROM questionnaire
+WHERE id = ?;
+
+lastInsertRowId:
+SELECT last_insert_rowid();

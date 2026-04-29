@@ -1,0 +1,25 @@
+CREATE TABLE catalog (
+    id INTEGER NOT NULL PRIMARY KEY AUTOINCREMENT,
+    slug TEXT NOT NULL,
+    url TEXT NOT NULL,
+    modified_at INTEGER NOT NULL,
+    UNIQUE (slug)
+);
+
+CREATE INDEX catalog_slug ON catalog(slug);
+
+upsert:
+INSERT INTO catalog (slug, url, modified_at)
+VALUES (?, ?, ?)
+ON CONFLICT(slug) DO UPDATE SET
+    url = excluded.url,
+    modified_at = excluded.modified_at;
+
+selectBySlug:
+SELECT id, url, modified_at
+FROM catalog
+WHERE slug = ?;
+
+selectAll:
+SELECT *
+FROM catalog;

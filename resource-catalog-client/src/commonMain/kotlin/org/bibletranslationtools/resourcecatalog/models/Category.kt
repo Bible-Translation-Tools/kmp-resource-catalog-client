@@ -1,0 +1,11 @@
+package org.bibletranslationtools.resourcecatalog.models
+
+/**
+ * Represents a project category. e.g. a group of projects.
+ */
+data class Category(
+    /** the category code */
+    val slug: String,
+    /** the name of the category */
+    val name: String
+)

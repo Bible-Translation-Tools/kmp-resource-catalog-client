@@ -1,0 +1,40 @@
+CREATE TABLE questionnaire_data_field (
+    id INTEGER NOT NULL PRIMARY KEY AUTOINCREMENT,
+    field TEXT NOT NULL,
+    question_td_id INTEGER NOT NULL,
+    questionnaire_id INTEGER NOT NULL,
+    UNIQUE (field, questionnaire_id),
+    FOREIGN KEY (questionnaire_id) REFERENCES questionnaire (id) ON DELETE CASCADE
+);
+
+CREATE INDEX questionnaire_data_field_field ON questionnaire_data_field(field);
+
+selectAll:
+SELECT *
+FROM questionnaire_data_field;
+
+selectById:
+SELECT *
+FROM questionnaire_data_field
+WHERE id = ?;
+
+selectByQuestionnaire:
+SELECT *
+FROM questionnaire_data_field
+WHERE questionnaire_id = ?;
+
+selectByQuestionnaireAndField:
+SELECT *
+FROM questionnaire_data_field
+WHERE questionnaire_id = ? AND field = ?;
+
+insert:
+INSERT INTO questionnaire_data_field (field, question_td_id, questionnaire_id)
+VALUES (?, ?, ?);
+
+deleteById:
+DELETE FROM questionnaire_data_field
+WHERE id = ?;
+
+lastInsertRowId:
+SELECT last_insert_rowid();

@@ -3,6 +3,7 @@ plugins {
     id "org.jetbrains.kotlin.multiplatform"
     id "org.jetbrains.kotlin.plugin.serialization"
     id "maven-publish"
+    id "app.cash.sqldelight" version "2.3.2"
 }
 
 group = "org.bibletranslationtools"
@@ -19,11 +20,18 @@ kotlin {
     sourceSets {
         commonMain {
             dependencies {
+                implementation "org.bibletranslationtools:resource-container:1.0.1"
+
                 implementation "org.jetbrains.kotlinx:kotlinx-serialization-json:1.11.0"
-                implementation 'io.ktor:ktor-client-core:3.4.3'
-                implementation 'io.ktor:ktor-client-okhttp:3.4.3'
-                implementation 'io.ktor:ktor-client-content-negotiation:3.4.3'
-                implementation 'io.ktor:ktor-serialization-kotlinx-json:3.4.3'
+
+                implementation "io.ktor:ktor-client-core:3.4.3"
+                implementation "io.ktor:ktor-client-okhttp:3.4.3"
+                implementation "io.ktor:ktor-client-content-negotiation:3.4.3"
+                implementation "io.ktor:ktor-serialization-kotlinx-json:3.4.3"
+
+                // SQLDelight
+                implementation "app.cash.sqldelight:runtime:2.3.2"
+                implementation "app.cash.sqldelight:coroutines-extensions:2.3.2"
             }
         }
 
@@ -34,14 +42,27 @@ kotlin {
                 implementation("org.jetbrains.kotlinx:kotlinx-coroutines-test:1.10.2")
             }
         }
+
+        androidMain {
+            dependencies {
+                implementation "app.cash.sqldelight:android-driver:2.3.2"
+                implementation("com.github.requery:sqlite-android:3.49.0")
+            }
+        }
+
+        jvmMain {
+            dependencies {
+                implementation "app.cash.sqldelight:sqlite-driver:2.3.2"
+            }
+        }
     }
 }
 
 android {
-    namespace "org.bibletranslationtools.resource-catalog-client"
+    namespace "org.bibletranslationtools.resourcecatalog"
     compileSdk = 35
     defaultConfig {
-        minSdk 21
+        minSdk 23
     }
     buildTypes {
         release {
@@ -52,6 +73,10 @@ android {
     buildFeatures {
         buildConfig = true
     }
+    packagingOptions {
+        exclude 'lib/x86/libsqlite3x.so'
+        exclude 'lib/x86_64/libsqlite3x.so'
+    }
 }
 
 publishing {
@@ -59,7 +84,7 @@ publishing {
         groupId = group
         version = version
         pom {
-            name = "Logger"
+            name = "Resource Catalog Client"
             description = "A client library for interacting with the resource catalogs"
             inceptionYear = "2026"
             url = "https://github.com/bibletranslationtools/kmp-resource-catalog-client/"
@@ -100,6 +125,15 @@ publishing {
                 username = project.findProperty("repoUser") ?: System.getenv("REPO_USER")
                 password = project.findProperty("repoPassword") ?: System.getenv("REPO_PASSWORD")
             }
+        }
+    }
+}
+
+sqldelight {
+    databases {
+        register("Database") {
+            packageName = "org.bibletranslationtools.resourcecatalog"
+            dialect("app.cash.sqldelight:sqlite-3-38-dialect:2.3.2")
         }
     }
 }

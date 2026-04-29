@@ -1,0 +1,15 @@
+CREATE TABLE versification_name (
+    id INTEGER NOT NULL PRIMARY KEY AUTOINCREMENT,
+    source_language_id INTEGER NOT NULL,
+    versification_id INTEGER NOT NULL,
+    name TEXT NOT NULL,
+    FOREIGN KEY (source_language_id) REFERENCES source_language (id),
+    FOREIGN KEY (versification_id) REFERENCES versification (id) ON DELETE CASCADE,
+    UNIQUE (source_language_id, versification_id)
+);
+
+upsert:
+INSERT INTO versification_name (source_language_id, versification_id, name)
+VALUES (?, ?, ?)
+ON CONFLICT(source_language_id, versification_id) DO UPDATE SET
+    name = excluded.name;

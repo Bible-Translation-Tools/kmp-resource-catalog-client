@@ -1,0 +1,73 @@
+CREATE TABLE target_language (
+    id INTEGER NOT NULL PRIMARY KEY AUTOINCREMENT,
+    slug TEXT NOT NULL,
+    name TEXT NOT NULL,
+    anglicized_name TEXT DEFAULT NULL,
+    direction TEXT NOT NULL DEFAULT 'ltr',
+    region TEXT NOT NULL DEFAULT '',
+    is_gateway_language INTEGER NOT NULL DEFAULT 0,
+    UNIQUE (slug)
+);
+
+CREATE INDEX target_language_slug ON target_language(slug);
+CREATE INDEX target_language_name ON target_language(name);
+
+upsert:
+INSERT INTO target_language (slug, name, anglicized_name, direction, region, is_gateway_language)
+VALUES (?, ?, ?, ?, ?, ?)
+ON CONFLICT(slug) DO UPDATE SET
+    name = excluded.name,
+    anglicized_name = excluded.anglicized_name,
+    direction = excluded.direction,
+    region = excluded.region,
+    is_gateway_language = excluded.is_gateway_language;
+
+deleteAll:
+DELETE FROM target_language;
+
+-- Selects the target language by slug, falling back to an unapproved temp
+-- target language with the same slug. Mirrors the legacy UNION query.
+selectMergedBySlug:
+SELECT slug, name, anglicized_name, direction, region, is_gateway_language
+FROM (
+    SELECT slug, name, anglicized_name, direction, region, is_gateway_language
+    FROM target_language
+    UNION
+    SELECT slug, name, anglicized_name, direction, region, is_gateway_language
+    FROM temp_target_language
+    WHERE approved_target_language_slug IS NULL
+)
+WHERE slug = ?
+LIMIT 1;
+
+selectMergedAll:
+SELECT slug, name, anglicized_name, direction, region, is_gateway_language
+FROM (
+    SELECT slug, name, anglicized_name, direction, region, is_gateway_language
+    FROM target_language
+    UNION
+    SELECT slug, name, anglicized_name, direction, region, is_gateway_language
+    FROM temp_target_language
+    WHERE approved_target_language_slug IS NULL
+)
+ORDER BY slug ASC, name ASC;
+
+findMergedByName:
+SELECT slug, name, anglicized_name, direction, region, is_gateway_language
+FROM (
+    SELECT slug, name, anglicized_name, direction, region, is_gateway_language
+    FROM target_language
+    UNION
+    SELECT slug, name, anglicized_name, direction, region, is_gateway_language
+    FROM temp_target_language
+    WHERE approved_target_language_slug IS NULL
+)
+WHERE LOWER(name) LIKE ?
+ORDER BY slug ASC, name ASC;
+
+selectApprovedByTempSlug:
+SELECT tl.*
+FROM target_language AS tl
+LEFT JOIN temp_target_language AS ttl
+    ON ttl.approved_target_language_slug = tl.slug
+WHERE ttl.slug = ?;
