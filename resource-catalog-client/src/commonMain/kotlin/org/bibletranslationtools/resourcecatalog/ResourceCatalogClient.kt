@@ -27,7 +27,7 @@ import java.io.File
 import org.bibletranslationtools.resourcecontainer.Resource as RcResource
 
 class ResourceCatalogClient(
-    private val databasePath: String,
+    private val databaseFile: File,
     private val containersDir: File,
     httpClient: HttpClient = Api.defaultHttpClient()
 ) {
@@ -59,15 +59,13 @@ class ResourceCatalogClient(
     }
 
     fun openLibrary() {
-        library = Library(databasePath)
+        library = Library(databaseFile.absolutePath)
     }
 
     /**
      * Closes the database connection. The client must not be used after this.
      */
     fun closeLibrary() = library.closeDatabase()
-
-
 
     suspend fun updateSources(
         url: String,
