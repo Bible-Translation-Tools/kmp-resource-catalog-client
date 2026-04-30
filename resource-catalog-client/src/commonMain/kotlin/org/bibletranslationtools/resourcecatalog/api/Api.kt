@@ -54,9 +54,7 @@ internal class Api(private val httpClient: HttpClient = defaultHttpClient()) {
     }
 
     private suspend fun fetchResourcesForLanguage(language: LanguageCatalog): List<ResourceCatalog> {
-        println(language.resourceUrl)
-        val resource: List<ResourceCatalog> = httpClient.get(language.resourceUrl).body()
-        return resource
+        return httpClient.get(language.resourceUrl).body()
     }
 
     /**
