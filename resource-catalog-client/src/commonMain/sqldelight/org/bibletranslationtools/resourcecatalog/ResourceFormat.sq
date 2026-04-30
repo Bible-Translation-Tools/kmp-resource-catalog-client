@@ -11,6 +11,7 @@ CREATE TABLE resource_format (
 );
 
 CREATE INDEX resource_format_mime_type ON resource_format(mime_type);
+CREATE INDEX resource_format_resource_id ON resource_format(resource_id);
 
 upsert:
 INSERT INTO resource_format (

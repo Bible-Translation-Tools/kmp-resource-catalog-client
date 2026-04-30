@@ -17,6 +17,7 @@ CREATE TABLE resource (
 CREATE INDEX resource_slug ON resource(slug);
 CREATE INDEX resource_translate_mode ON resource(translate_mode);
 CREATE INDEX resource_checking_level ON resource(checking_level);
+CREATE INDEX resource_project_id ON resource(project_id);
 
 upsert:
 INSERT INTO resource (
@@ -87,25 +88,24 @@ SELECT
     p.slug AS project_slug, p.name AS project_name, p.desc, p.icon, p.sort, p.chunks_url,
     r.id AS resource_id, r.slug AS resource_slug, r.name AS resource_name,
     r.type, r.translate_mode, r.checking_level, r.comments, r.pub_date, r.license, r.version,
-    lri.translation_words_assignments_url
+    lri.translation_words_assignments_url,
+    COUNT(CASE WHEN rf.imported = 1 THEN 1 END) AS num_imported
 FROM source_language AS l
 LEFT JOIN project AS p ON p.source_language_id = l.id
-LEFT JOIN (
-    SELECT r.*, COUNT(rf.id) AS num_imported FROM resource AS r
-    LEFT JOIN resource_format AS rf ON rf.resource_id = r.id AND rf.imported = 1
-    GROUP BY r.id
-) AS r ON r.project_id = p.id
+LEFT JOIN resource AS r ON r.project_id = p.id
+LEFT JOIN resource_format AS rf ON rf.resource_id = r.id
 LEFT JOIN legacy_resource_info AS lri ON lri.resource_id = r.id
 WHERE l.slug LIKE :languageSlug
   AND p.slug LIKE :projectSlug
   AND r.slug LIKE :resourceSlug
-  AND (
-      (r.checking_level >= :minCheckingLevel
-       AND (:maxCheckingLevel < 0 OR r.checking_level <= :maxCheckingLevel)
-       AND r.translate_mode LIKE :translateMode)
-      OR r.num_imported > 0
-  )
-  AND r.type LIKE :resourceType;
+  AND r.type LIKE :resourceType
+GROUP BY r.id
+HAVING (
+    (r.checking_level >= :minCheckingLevel
+     AND (:maxCheckingLevel < 0 OR r.checking_level <= :maxCheckingLevel)
+     AND r.translate_mode LIKE :translateMode)
+    OR num_imported > 0
+);
 
 importedTranslations:
 SELECT
@@ -113,13 +113,12 @@ SELECT
     p.slug AS project_slug, p.name AS project_name, p.desc, p.icon, p.sort, p.chunks_url,
     r.id AS resource_id, r.slug AS resource_slug, r.name AS resource_name,
     r.type, r.translate_mode, r.checking_level, r.comments, r.pub_date, r.license, r.version,
-    lri.translation_words_assignments_url
+    lri.translation_words_assignments_url,
+    COUNT(CASE WHEN rf.imported = 1 THEN 1 END) AS num_imported
 FROM source_language AS l
 LEFT JOIN project AS p ON p.source_language_id = l.id
-LEFT JOIN (
-    SELECT r.*, COUNT(rf.id) AS num_imported FROM resource AS r
-    LEFT JOIN resource_format AS rf ON rf.resource_id = r.id AND rf.imported = 1
-    GROUP BY r.id
-) AS r ON r.project_id = p.id
+LEFT JOIN resource AS r ON r.project_id = p.id
+LEFT JOIN resource_format AS rf ON rf.resource_id = r.id
 LEFT JOIN legacy_resource_info AS lri ON lri.resource_id = r.id
-WHERE r.num_imported > 0;
+GROUP BY r.id
+HAVING num_imported > 0;

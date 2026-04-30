@@ -12,6 +12,7 @@ import org.bibletranslationtools.resourcecatalog.api.models.toRcStatus
 import org.bibletranslationtools.resourcecatalog.library.Index
 import org.bibletranslationtools.resourcecatalog.library.Library
 import org.bibletranslationtools.resourcecatalog.library.models.Catalog
+import org.bibletranslationtools.resourcecatalog.library.models.CatalogType
 import org.bibletranslationtools.resourcecatalog.library.models.Category
 import org.bibletranslationtools.resourcecatalog.library.models.SourceLanguage
 import org.bibletranslationtools.resourcecatalog.library.models.Versification
@@ -25,17 +26,15 @@ import org.bibletranslationtools.resourcecontainer.errors.MissingRCException
 import java.io.File
 import org.bibletranslationtools.resourcecontainer.Resource as RcResource
 
-class CatalogClient(
+class ResourceCatalogClient(
     private val databasePath: String,
-    private val resourceDir: File,
+    private val containersDir: File,
     httpClient: HttpClient = Api.defaultHttpClient()
 ) {
 
     private val api = Api(httpClient)
     lateinit var library: Index
         private set
-
-    private val sourceCatalogs = mutableListOf<Catalog>()
 
     // Single-threaded dispatcher for all database operations. Guarantees
     // serial access and prevents connection starvation across coroutines.
@@ -45,19 +44,30 @@ class CatalogClient(
     // database transaction open.
     private val networkDispatcher = Dispatchers.IO
 
-    fun open() {
+    val isLibraryDeployed: Boolean
+        get() {
+            val containersDir = containersDir
+            val hasContainers = containersDir.exists() &&
+                    containersDir.isDirectory &&
+                    (containersDir.list()?.isNotEmpty() == true)
+
+            return library.getSourceLanguages().size > 1 && hasContainers
+        }
+
+    init {
+        openLibrary()
+    }
+
+    fun openLibrary() {
         library = Library(databasePath)
     }
 
     /**
      * Closes the database connection. The client must not be used after this.
      */
-    fun close() = library.closeDatabase()
+    fun closeLibrary() = library.closeDatabase()
 
-    fun setSourceCatalogs(catalogs: List<Catalog>) {
-        sourceCatalogs.clear()
-        sourceCatalogs.addAll(catalogs)
-    }
+
 
     suspend fun updateSources(
         url: String,
@@ -249,34 +259,32 @@ class CatalogClient(
     /**
      * Updates all global catalogs (languages, temp languages, approvals).
      *
-     * @param force if true, re-injects global catalog URLs into the DB first
+     * @param catalogs re-injects the list of catalog URLs into the DB first
      */
     @Throws(Exception::class)
     suspend fun updateCatalogs(
-        force: Boolean,
+        catalogs: List<Catalog> = emptyList(),
         onProgress: (Float, String?) -> Unit = { _, _ -> }
     ) {
-        if (force) {
-            withContext(dbDispatcher) {
-                sourceCatalogs.forEach { library.addCatalog(it) }
-            }
+        withContext(dbDispatcher) {
+            catalogs.forEach { library.addCatalog(it) }
         }
         val catalogs = withContext(dbDispatcher) { library.getCatalogs() }
         for (catalog in catalogs) {
-            updateCatalog(catalog.slug, catalog.url, onProgress)
+            updateCatalog(catalog.type, catalog.url, onProgress)
         }
     }
 
     @Throws(Exception::class)
     private suspend fun updateCatalog(
-        slug: String,
+        type: CatalogType,
         url: String,
         onProgress: (Float, String?) -> Unit
     ) {
         val data = withContext(networkDispatcher) { api.fetchCatalog(url) }
 
-        when (slug) {
-            "langnames" -> {
+        when (type) {
+            CatalogType.TARGET_LANGUAGES -> {
                 val languages = api.parseTargetLanguages(data)
                 library.clearTargetLanguages()
 
@@ -285,12 +293,14 @@ class CatalogClient(
                         if (!library.addTargetLanguage(language)) {
                             Logger.w(this::javaClass.name, "Failed to add target language: ${language.slug}")
                         }
-                        onProgress(i / languages.size.toFloat(), slug)
+                        onProgress(i / languages.size.toFloat(), type.slug)
                     }
                 }
             }
-            "new-language-questions" -> { /* not implemented */ }
-            "temp-langnames" -> {
+            CatalogType.LANGUAGE_QUESTIONS -> {
+                // Not Implemented
+            }
+            CatalogType.TEMP_LANGUAGES -> {
                 val languages = api.parseTargetLanguages(data)
                 library.clearTempLanguages()
 
@@ -299,11 +309,11 @@ class CatalogClient(
                         if (!library.addTempTargetLanguage(language)) {
                             Logger.w(this::javaClass.name, "Failed to add temp language: ${language.slug}")
                         }
-                        onProgress((i + 1) / languages.size.toFloat(), slug)
+                        onProgress(i / languages.size.toFloat(), type.slug)
                     }
                 }
             }
-            "approved-temp-langnames" -> {
+            CatalogType.APPROVED_LANGUAGES -> {
                 val approvals = api.parseApprovedTempLanguages(data)
                 library.clearApprovedTempLanguages()
                 withTransaction {
@@ -311,11 +321,10 @@ class CatalogClient(
                         if (!library.setApprovedTargetLanguage(tempSlug, approvedSlug)) {
                             Logger.w(this::javaClass.name, "Failed to approve temp language: $tempSlug as $approvedSlug")
                         }
-                        onProgress((i + 1) / approvals.size.toFloat(), slug)
+                        onProgress(i / approvals.size.toFloat(), type.slug)
                     }
                 }
             }
-            else -> throw Exception("Catalog '$slug' is not supported")
         }
     }
 
@@ -355,8 +364,8 @@ class CatalogClient(
             Quadruple(fmt, slug, info, url)
         }
 
-        val destFile = File(resourceDir, "$containerSlug.${ResourceContainer.FILE_EXTENSION}")
-        val containerDir = File(resourceDir, containerSlug)
+        val destFile = File(containersDir, "$containerSlug.${ResourceContainer.FILE_EXTENSION}")
+        val containerDir = File(containersDir, containerSlug)
         FileUtil.deleteQuietly(destFile)
         FileUtil.deleteQuietly(containerDir)
 
@@ -407,7 +416,7 @@ class CatalogClient(
         deleteResourceContainer(rc.slug)
         FileUtil.copyDirectory(
             directory,
-            File(resourceDir, rc.slug),
+            File(containersDir, rc.slug),
             null
         )
 
@@ -457,7 +466,7 @@ class CatalogClient(
         resourceSlug: String
     ) {
         val slug = ContainerTools.makeSlug(languageSlug, projectSlug, resourceSlug)
-        val srcDir = File(resourceDir, slug)
+        val srcDir = File(containersDir, slug)
         val srcFile = File("$srcDir.${ResourceContainer.FILE_EXTENSION}")
         if (!srcFile.exists() && srcDir.isDirectory) ResourceContainer.close(srcDir)
         if (!srcFile.exists()) throw MissingRCException("Resource container not found at $srcFile")
@@ -484,7 +493,7 @@ class CatalogClient(
      */
     @Throws(Exception::class)
     fun openResourceContainer(containerSlug: String): ResourceContainer {
-        val directory = File(resourceDir, containerSlug)
+        val directory = File(containersDir, containerSlug)
         val archive = File("$directory.${ResourceContainer.FILE_EXTENSION}")
         return try {
             if (directory.exists() && directory.isDirectory) {
@@ -508,7 +517,7 @@ class CatalogClient(
 
         val rcSlug = ContainerTools.makeSlug(sourceLanguageSlug, projectSlug, resourceSlug)
 
-        return ResourceContainer.close(File(resourceDir, rcSlug))
+        return ResourceContainer.close(File(containersDir, rcSlug))
     }
 
     /** Returns when a resource container was last modified, or -1 if unknown. */
@@ -524,7 +533,7 @@ class CatalogClient(
 
     /** Returns true if the resource container exists on disk. */
     fun resourceContainerExists(containerSlug: String): Boolean {
-        val directory = File(resourceDir, containerSlug)
+        val directory = File(containersDir, containerSlug)
         val archive = File("$directory.${ResourceContainer.FILE_EXTENSION}")
         return (directory.exists() && directory.isDirectory) || (archive.exists() && archive.isFile)
     }
@@ -539,7 +548,7 @@ class CatalogClient(
 
     /** Deletes a resource container from disk. */
     fun deleteResourceContainer(containerSlug: String) {
-        val directory = File(resourceDir, containerSlug)
+        val directory = File(containersDir, containerSlug)
         val archive = File("$directory.${ResourceContainer.FILE_EXTENSION}")
         if (directory.exists() && directory.isDirectory) FileUtil.deleteQuietly(directory)
         if (archive.exists() && archive.isFile) FileUtil.deleteQuietly(archive)

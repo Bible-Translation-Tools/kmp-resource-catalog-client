@@ -1,0 +1,2 @@
+CREATE INDEX IF NOT EXISTS resource_format_resource_id ON resource_format(resource_id);
+CREATE INDEX IF NOT EXISTS resource_project_id ON resource(project_id);

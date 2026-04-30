@@ -9,6 +9,7 @@ import org.bibletranslationtools.resourcecatalog.SelectMergedAll
 import org.bibletranslationtools.resourcecatalog.SelectMergedBySlug
 import org.bibletranslationtools.resourcecatalog.createDatabaseDriver
 import org.bibletranslationtools.resourcecatalog.library.models.Catalog
+import org.bibletranslationtools.resourcecatalog.library.models.CatalogType
 import org.bibletranslationtools.resourcecatalog.library.models.Category
 import org.bibletranslationtools.resourcecatalog.library.models.CategoryEntry
 import org.bibletranslationtools.resourcecatalog.library.models.ChunkMarker
@@ -236,16 +237,15 @@ internal class Library(databasePath: String) : Index {
 
     @Throws(Exception::class)
     override fun addCatalog(catalog: Catalog): Long {
-        validateNotEmpty(catalog.slug)
         validateNotEmpty(catalog.url)
 
         return database.transactionWithResult {
             catalogQ.upsert(
-                slug = catalog.slug,
+                slug = catalog.type.slug,
                 url = catalog.url,
                 modified_at = catalog.modifiedAt.toLong()
             )
-            catalogQ.selectBySlug(catalog.slug).executeAsOne().id
+            catalogQ.selectBySlug(catalog.type.slug).executeAsOne().id
         }
     }
 
@@ -775,14 +775,20 @@ internal class Library(databasePath: String) : Index {
         }
     }
 
-    override fun getCatalog(slug: String): Catalog? =
-        catalogQ.selectBySlug(slug).executeAsOneOrNull()?.let {
-            Catalog(slug, it.url, it.modified_at.toInt())
+    override fun getCatalog(type: CatalogType): Catalog? =
+        catalogQ.selectBySlug(type.slug).executeAsOneOrNull()?.let {
+            Catalog(type, it.url, it.modified_at.toInt())
         }
 
     override fun getCatalogs(): List<Catalog> =
         catalogQ.selectAll().executeAsList()
-            .map { Catalog(it.slug, it.url, it.modified_at.toInt()) }
+            .map {
+                Catalog(
+                    CatalogType.of(it.slug),
+                    it.url,
+                    it.modified_at.toInt()
+                )
+            }
 
     override fun getVersification(languageSlug: String, versificationSlug: String): Versification? =
         versificationQ.selectByLanguageAndSlug(

@@ -10,18 +10,18 @@ internal data class ResourceCatalog(
     @SerialName("date_modified")
     val modifiedAt: String,
     @SerialName("source")
-    val sourceUrl: String,
+    val sourceUrl: String = "",
     @SerialName("chunks")
-    val chunksUrl: String,
+    val chunksUrl: String = "",
     @SerialName("usfm")
-    val usfmUrl: String,
+    val usfmUrl: String = "",
     @SerialName("notes")
-    val notesUrl: String,
+    val notesUrl: String = "",
     @SerialName("checking_questions")
-    val questionsUrl: String,
+    val questionsUrl: String = "",
     @SerialName("terms")
-    val termsUrl: String,
+    val termsUrl: String = "",
     @SerialName("tw_cat")
-    val twCatUrl: String,
+    val twCatUrl: String = "",
     val status: ProjectStatus
 )

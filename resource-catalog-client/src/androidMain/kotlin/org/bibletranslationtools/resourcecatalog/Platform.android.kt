@@ -5,6 +5,7 @@ import androidx.sqlite.db.SupportSQLiteDatabase
 import app.cash.sqldelight.db.SqlDriver
 import app.cash.sqldelight.driver.android.AndroidSqliteDriver
 import io.requery.android.database.sqlite.RequerySQLiteOpenHelperFactory
+import java.io.File
 
 internal var appContext: Context? = null
 
@@ -14,7 +15,10 @@ fun initAndroid(context: Context) {
 
 internal actual fun createDatabaseDriver(path: String): SqlDriver {
     val ctx = appContext
-        ?: error("Call initAndroid(context) before open()")
+        ?: error("Call initAndroid(context) before openLibrary()")
+
+    val file = File(path)
+    file.parentFile?.mkdirs()
 
     val callback = object : AndroidSqliteDriver.Callback(Database.Schema) {
         override fun onCreate(db: SupportSQLiteDatabase) {}
@@ -22,13 +26,23 @@ internal actual fun createDatabaseDriver(path: String): SqlDriver {
             super.onConfigure(db)
             db.setForeignKeyConstraintsEnabled(true)
         }
+
+        override fun onUpgrade(db: SupportSQLiteDatabase, oldVersion: Int, newVersion: Int) {
+            super.onUpgrade(db, oldVersion, newVersion)
+        }
     }
 
-    return AndroidSqliteDriver(
+    val driver =  AndroidSqliteDriver(
         schema = Database.Schema,
         context = ctx,
         name = path,
         factory = RequerySQLiteOpenHelperFactory(),
         callback = callback
     )
+
+    if (!file.exists()) {
+        Database.Schema.create(driver)
+    }
+
+    return driver
 }

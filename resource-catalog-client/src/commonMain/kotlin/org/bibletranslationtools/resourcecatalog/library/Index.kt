@@ -1,6 +1,7 @@
 package org.bibletranslationtools.resourcecatalog.library
 
 import org.bibletranslationtools.resourcecatalog.library.models.Catalog
+import org.bibletranslationtools.resourcecatalog.library.models.CatalogType
 import org.bibletranslationtools.resourcecatalog.library.models.Category
 import org.bibletranslationtools.resourcecatalog.library.models.CategoryEntry
 import org.bibletranslationtools.resourcecatalog.library.models.ChunkMarker
@@ -298,10 +299,10 @@ interface Index {
     /**
      * Returns a catalog
      *
-     * @param slug Catalog slug
+     * @param type Catalog type
      * @return the catalog object or null if it does not exist
      */
-    fun getCatalog(slug: String): Catalog?
+    fun getCatalog(type: CatalogType): Catalog?
 
     /**
      * Returns a list of catalogs

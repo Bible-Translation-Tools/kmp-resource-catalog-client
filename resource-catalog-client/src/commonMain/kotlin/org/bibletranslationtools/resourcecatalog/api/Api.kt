@@ -32,7 +32,7 @@ internal class Api(private val httpClient: HttpClient = defaultHttpClient()) {
      * projects with their languages and resources fully populated.
      *
      * This is a pure network operation — no DB access. The result is passed
-     * to [org.bibletranslationtools.resourcecatalog.CatalogClient] which writes it in a single transaction.
+     * to [org.bibletranslationtools.resourcecatalog.ResourceCatalogClient] which writes it in a single transaction.
      */
     @Throws(Exception::class)
     suspend fun fetchSources(
@@ -54,14 +54,16 @@ internal class Api(private val httpClient: HttpClient = defaultHttpClient()) {
     }
 
     private suspend fun fetchResourcesForLanguage(language: LanguageCatalog): List<ResourceCatalog> {
-        return httpClient.get(language.resourceUrl).body()
+        println(language.resourceUrl)
+        val resource: List<ResourceCatalog> = httpClient.get(language.resourceUrl).body()
+        return resource
     }
 
     /**
      * Downloads chunk markers for all projects in [chunkUrls].
      *
      * Pure network operation — no DB access. Pass the result to
-     * [org.bibletranslationtools.resourcecatalog.CatalogClient] which writes it in a single transaction.
+     * [org.bibletranslationtools.resourcecatalog.ResourceCatalogClient] which writes it in a single transaction.
      */
     @Throws(Exception::class)
     suspend fun fetchChunks(
