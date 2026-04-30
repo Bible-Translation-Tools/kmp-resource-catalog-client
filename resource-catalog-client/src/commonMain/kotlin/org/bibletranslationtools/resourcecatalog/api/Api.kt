@@ -140,6 +140,11 @@ internal class Api(private val httpClient: HttpClient = defaultHttpClient()) {
         }
 
         fun defaultHttpClient() = HttpClient(OkHttp) {
+            engine {
+                config {
+                    cache(null)
+                }
+            }
             install(ContentNegotiation) {
                 json(json)
             }
