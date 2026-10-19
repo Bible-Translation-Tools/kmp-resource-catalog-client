@@ -130,6 +130,9 @@ internal class Library(databasePath: String) : Index {
         return true
     }
 
+    override fun isTempTargetLanguage(slug: String): Boolean =
+        tempTargetLanguageQ.existsBySlug(slug).executeAsOne()
+
     @Throws(Exception::class)
     override fun setApprovedTargetLanguage(tempTargetLanguageSlug: String, targetLanguageSlug: String): Boolean {
         validateNotEmpty(tempTargetLanguageSlug)

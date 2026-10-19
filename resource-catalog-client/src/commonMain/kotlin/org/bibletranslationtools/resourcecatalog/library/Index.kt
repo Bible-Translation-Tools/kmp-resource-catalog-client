@@ -126,6 +126,13 @@ interface Index {
     ): Boolean
 
     /**
+     * Checks whether a target language is stored in the temporary target language table
+     *
+     * @param slug target language slug
+     */
+    fun isTempTargetLanguage(slug: String): Boolean
+
+    /**
      * Maps approved target language to temporary language
      *
      * @param tempTargetLanguageSlug temporary target language slug
