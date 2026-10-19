@@ -221,6 +221,13 @@ class LibraryTest {
     }
 
     @Test
+    fun isTempTargetLanguageDistinguishesTempFromRegular() {
+        library.addTempTargetLanguage(TargetLanguage("tmp-xyz", "Temp XYZ", "ltr"))
+        assertTrue(library.isTempTargetLanguage("tmp-xyz"))
+        assertFalse(library.isTempTargetLanguage("en"))
+    }
+
+    @Test
     fun setApprovedTargetLanguageReturnsFalseWhenTempNotFound() {
         assertFalse(library.setApprovedTargetLanguage("nonexistent", "en"))
     }
